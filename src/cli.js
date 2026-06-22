@@ -9,6 +9,7 @@ import { runMockCycle } from "./mock-cycle.js";
 import { runSandboxCommand } from "./sandbox.js";
 import { runAgentTask } from "./agent.js";
 import { verifyTestEvidence } from "./test-gate.js";
+import { commitTask, createTaskBranch, fixturePr, recordGitMetadata } from "./git-workflow.js";
 import { validateProjectDirectory } from "./project.js";
 import { getProject, loadProjectRegistry } from "./registry.js";
 
@@ -24,6 +25,9 @@ function parseArguments(argv) {
   let commandId;
   let adapterId;
   let promptPath;
+  let task;
+  let message;
+  let provider;
   const command = args.shift();
   while (args.length > 0) {
     const option = args.shift();
@@ -35,21 +39,24 @@ function parseArguments(argv) {
     else if (option === "--command") commandId = args.shift();
     else if (option === "--adapter") adapterId = args.shift();
     else if (option === "--prompt") promptPath = args.shift();
+    else if (option === "--task") task = args.shift();
+    else if (option === "--message") message = args.shift();
+    else if (option === "--provider") provider = args.shift();
     else throw new HephaestusError(`Unknown option: ${option}.`, "INVALID_ARGUMENT");
-    if (!configPath || (option === "--project" && !projectId) || (option === "--mock-gpt" && !mockGptPath) || (option === "--mock-agent-output" && !mockAgentOutputPath) || (option === "--command" && !commandId) || (option === "--adapter" && !adapterId) || (option === "--prompt" && !promptPath)) {
+    if (!configPath || (option === "--project" && !projectId) || (option === "--mock-gpt" && !mockGptPath) || (option === "--mock-agent-output" && !mockAgentOutputPath) || (option === "--command" && !commandId) || (option === "--adapter" && !adapterId) || (option === "--prompt" && !promptPath) || (option === "--task" && !task) || (option === "--message" && !message) || (option === "--provider" && !provider)) {
       throw new HephaestusError(`Option ${option} requires a value.`, "INVALID_ARGUMENT");
     }
   }
-  return { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath };
+  return { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider };
 }
 
 export function run(argv) {
-  const { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath } = parseArguments(argv);
+  const { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider } = parseArguments(argv);
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(`${HELP}\n`);
     return 0;
   }
-  if (command !== "validate" && command !== "inspect" && command !== "cycle" && command !== "sandbox-run" && command !== "agent-run" && command !== "verify-tests") throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  if (!["validate","inspect","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command)) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   const config = loadConfig(path.resolve(configPath));
   const projects = loadProjectRegistry(config.registryPath, config.allowedRoot);
@@ -116,6 +123,9 @@ export function run(argv) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return result.status === "passed" ? 0 : 1;
   }
+  if (command === "git-branch") { if (!task) throw new HephaestusError("git-branch requires --task.", "INVALID_ARGUMENT"); const branch=createTaskBranch(project.path,project.id,task); recordGitMetadata(project.path,validateProjectDirectory(config.allowedRoot,project.path).state,{branch}); process.stdout.write(`${branch}\n`); return 0; }
+  if (command === "git-commit") { if (!message) throw new HephaestusError("git-commit requires --message.", "INVALID_ARGUMENT"); const commit=commitTask(project.path,message); recordGitMetadata(project.path,validateProjectDirectory(config.allowedRoot,project.path).state,{branch:commit.branch,commit}); process.stdout.write(`${JSON.stringify(commit)}\n`); return 0; }
+  if (command === "pr-open") { if (provider!=="fixture-pr"||!task) throw new HephaestusError("pr-open requires --provider fixture-pr and --task.", "INVALID_ARGUMENT"); const state=validateProjectDirectory(config.allowedRoot,project.path).state; const pr=fixturePr(project.id,task,state.currentPr?{url:state.currentPr}:null); recordGitMetadata(project.path,state,pr); process.stdout.write(`${JSON.stringify(pr)}\n`); return 0; }
 
   validateProjectDirectory(config.allowedRoot, project.path);
   const logDirectory = ensureProjectLogDirectory(config.logDirectory, project.id);
