@@ -46,7 +46,17 @@ function dockerResult(args, timeout = COMMAND_TIMEOUT_MS) {
   });
 }
 
-function sandboxArgs(projectPath, containerName, script) {
+function assertSafeMountPath(projectPath) {
+  if (typeof projectPath !== "string" || projectPath.length === 0) {
+    fail("Sandbox mount path must be a non-empty string.", "UNSAFE_SANDBOX_MOUNT_PATH");
+  }
+  if (/[,=\n\r\0]/u.test(projectPath)) {
+    fail("Sandbox mount path contains characters that would corrupt the Docker mount specification.", "UNSAFE_SANDBOX_MOUNT_PATH");
+  }
+}
+
+export function sandboxArgs(projectPath, containerName, script) {
+  assertSafeMountPath(projectPath);
   return [
     "run", "--name", containerName, "--rm",
     "--network", "none",

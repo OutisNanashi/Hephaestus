@@ -1,16 +1,22 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fail } from "./errors.js";
-import { assertRealPathWithinRoot } from "./safe-path.js";
+import { fail, HephaestusError } from "./errors.js";
+import { assertRealPathWithinRoot, resolveSafePath } from "./safe-path.js";
 
 const DECLARATION = "TESTS.json";
 const REPORT = path.join("out", "test_reports", "evidence.json");
 
 function readJson(projectPath, relativePath, label) {
-  const filePath = path.join(projectPath, relativePath);
+  let filePath;
+  try {
+    filePath = resolveSafePath(projectPath, relativePath);
+  } catch (error) {
+    if (error instanceof HephaestusError) throw error;
+    fail(`${label} path is invalid.`, "MISSING_TEST_EVIDENCE");
+  }
   if (!fs.existsSync(filePath)) fail(`${label} is missing or unreadable.`, "MISSING_TEST_EVIDENCE");
-  try { assertRealPathWithinRoot(projectPath, filePath); } catch (error) { if (error.code) throw error; }
+  assertRealPathWithinRoot(projectPath, filePath);
   let text;
   try { text = fs.readFileSync(filePath, "utf8"); } catch (error) { fail(`${label} is missing or unreadable.`, "MISSING_TEST_EVIDENCE"); }
   try { return JSON.parse(text); } catch (error) { fail(`${label} is malformed JSON.`, "MALFORMED_TEST_EVIDENCE"); }

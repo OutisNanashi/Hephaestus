@@ -59,9 +59,15 @@ export function loadState(projectPath) {
 export function saveState(projectPath, state) {
   const validatedState = validateState(state);
   const statePath = path.join(projectPath, "STATE.json");
-  if (fs.existsSync(statePath)) assertRealPathWithinRoot(projectPath, statePath);
+  let resolvedWritePath;
+  if (fs.existsSync(statePath)) {
+    resolvedWritePath = assertRealPathWithinRoot(projectPath, statePath);
+  } else {
+    const resolvedProjectPath = assertRealPathWithinRoot(projectPath, projectPath);
+    resolvedWritePath = path.join(resolvedProjectPath, "STATE.json");
+  }
   try {
-    fs.writeFileSync(statePath, `${JSON.stringify(validatedState, null, 2)}\n`, "utf8");
+    fs.writeFileSync(resolvedWritePath, `${JSON.stringify(validatedState, null, 2)}\n`, "utf8");
   } catch (error) {
     fail(`STATE.json could not be written: ${error.message}`, "STATE_WRITE_FAILED");
   }
