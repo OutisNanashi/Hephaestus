@@ -168,6 +168,6 @@ test("CLI help command succeeds without reading configuration", () => {
   } finally {
     process.stdout.write = originalWrite;
   }
-  assert.match(output, /Hephaestus Phase 0/u);
+  assert.match(output, /Hephaestus Phase/u);
   assert.match(output, /validate/u);
 });

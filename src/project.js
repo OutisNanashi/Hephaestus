@@ -23,6 +23,7 @@ export function validateProjectDirectory(allowedRoot, projectPath) {
     if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
       fail(`Project is missing required file: ${fileName}.`, "MISSING_REQUIRED_PROJECT_FILE");
     }
+    assertRealPathWithinRoot(safeProjectPath, filePath);
   }
   const state = loadState(safeProjectPath);
   return Object.freeze({ path: safeProjectPath, state });
