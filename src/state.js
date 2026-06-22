@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fail } from "./errors.js";
+import { assertRealPathWithinRoot } from "./safe-path.js";
 
 const REQUIRED_STATE_KEYS = [
   "currentPhase", "currentTask", "currentBranch", "currentPr", "assignedAgent",
@@ -52,4 +53,17 @@ export function loadState(projectPath) {
     if (error.code) throw error;
     fail(`STATE.json contains invalid JSON: ${error.message}`, "INVALID_JSON");
   }
+}
+
+/** Persist only a state object that still satisfies the Phase 0 schema. */
+export function saveState(projectPath, state) {
+  const validatedState = validateState(state);
+  const statePath = path.join(projectPath, "STATE.json");
+  if (fs.existsSync(statePath)) assertRealPathWithinRoot(projectPath, statePath);
+  try {
+    fs.writeFileSync(statePath, `${JSON.stringify(validatedState, null, 2)}\n`, "utf8");
+  } catch (error) {
+    fail(`STATE.json could not be written: ${error.message}`, "STATE_WRITE_FAILED");
+  }
+  return validatedState;
 }
