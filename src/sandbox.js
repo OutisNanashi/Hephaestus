@@ -17,6 +17,10 @@ const ALLOWLIST = Object.freeze({
   "test-timeout": Object.freeze({ script: "sleep 5" }),
   "test-workspace": Object.freeze({ script: "test -d /workspace && test -f /workspace/PLAN.md" }),
   "test-host-inaccessible": Object.freeze({ script: "test ! -e /host && test ! -e /mnt/c" })
+  , "fixture-agent": Object.freeze({ script: "test -f /workspace/out/prompts/next-task.md && printf 'fixture-agent received prompt:\\n'; cat /workspace/out/prompts/next-task.md; printf '\\nfixture-agent completed\\n'" })
+  , "fixture-agent-empty": Object.freeze({ script: ":" })
+  , "fixture-agent-crash": Object.freeze({ script: "printf 'fixture-agent crashed\\n' >&2; exit 23" })
+  , "fixture-agent-usage-limit": Object.freeze({ script: "printf 'usage limit reached; try again later\\n'" })
 });
 
 function dockerEnvironment() {

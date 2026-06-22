@@ -7,10 +7,11 @@ import { ensureProjectLogDirectory } from "./logging.js";
 import { inspectProject, saveInspectionReport, toInspectionSummary } from "./inspection.js";
 import { runMockCycle } from "./mock-cycle.js";
 import { runSandboxCommand } from "./sandbox.js";
+import { runAgentTask } from "./agent.js";
 import { validateProjectDirectory } from "./project.js";
 import { getProject, loadProjectRegistry } from "./registry.js";
 
-const HELP = `Hephaestus Phase 3\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n\nCommands:\n  validate     Validate one registered project and create its log directory.\n  inspect      Read and summarize one registered project without changing it.\n  cycle        Run one local mocked brain cycle using declared fixture files.\n  sandbox-run  Run one fixed allowlisted command in an isolated container.\n\nSafety:\n  Project paths and mock fixtures must remain within the configured allowedRoot.\n  sandbox-run accepts command IDs only; it never accepts arbitrary shell text.`;
+const HELP = `Hephaestus Phase 4\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n\nCommands:\n  validate     Validate one registered project and create its log directory.\n  inspect      Read and summarize one registered project without changing it.\n  cycle        Run one local mocked brain cycle using declared fixture files.\n  sandbox-run  Run one fixed allowlisted command in an isolated container.\n  agent-run    Run one fixture agent process inside the isolated container.\n\nSafety:\n  Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox.`;
 
 function parseArguments(argv) {
   const args = [...argv];
@@ -20,6 +21,8 @@ function parseArguments(argv) {
   let mockGptPath;
   let mockAgentOutputPath;
   let commandId;
+  let adapterId;
+  let promptPath;
   const command = args.shift();
   while (args.length > 0) {
     const option = args.shift();
@@ -29,21 +32,23 @@ function parseArguments(argv) {
     else if (option === "--mock-gpt") mockGptPath = args.shift();
     else if (option === "--mock-agent-output") mockAgentOutputPath = args.shift();
     else if (option === "--command") commandId = args.shift();
+    else if (option === "--adapter") adapterId = args.shift();
+    else if (option === "--prompt") promptPath = args.shift();
     else throw new HephaestusError(`Unknown option: ${option}.`, "INVALID_ARGUMENT");
-    if (!configPath || (option === "--project" && !projectId) || (option === "--mock-gpt" && !mockGptPath) || (option === "--mock-agent-output" && !mockAgentOutputPath) || (option === "--command" && !commandId)) {
+    if (!configPath || (option === "--project" && !projectId) || (option === "--mock-gpt" && !mockGptPath) || (option === "--mock-agent-output" && !mockAgentOutputPath) || (option === "--command" && !commandId) || (option === "--adapter" && !adapterId) || (option === "--prompt" && !promptPath)) {
       throw new HephaestusError(`Option ${option} requires a value.`, "INVALID_ARGUMENT");
     }
   }
-  return { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId };
+  return { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath };
 }
 
 export function run(argv) {
-  const { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId } = parseArguments(argv);
+  const { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath } = parseArguments(argv);
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(`${HELP}\n`);
     return 0;
   }
-  if (command !== "validate" && command !== "inspect" && command !== "cycle" && command !== "sandbox-run") throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  if (command !== "validate" && command !== "inspect" && command !== "cycle" && command !== "sandbox-run" && command !== "agent-run") throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   const config = loadConfig(path.resolve(configPath));
   const projects = loadProjectRegistry(config.registryPath, config.allowedRoot);
@@ -89,6 +94,20 @@ export function run(argv) {
       reportPath: report.reportPath
     }, null, 2)}\n`);
     return report.status === "passed" ? 0 : 1;
+  }
+
+  if (command === "agent-run") {
+    if (!adapterId || !promptPath) throw new HephaestusError("agent-run requires --adapter and --prompt.", "INVALID_ARGUMENT");
+    const result = runAgentTask({ allowedRoot: config.allowedRoot, projectPath: project.path, adapterId, promptPath });
+    process.stdout.write(`${JSON.stringify({
+      status: result.status,
+      adapterId: result.adapterId,
+      promptPath: result.promptPath,
+      agentOutputLength: result.output.length,
+      exitCode: result.report.exitCode,
+      nextAction: result.state.nextAction
+    }, null, 2)}\n`);
+    return result.status === "completed" ? 0 : 1;
   }
 
   validateProjectDirectory(config.allowedRoot, project.path);
