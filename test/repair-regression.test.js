@@ -31,6 +31,7 @@ const validState = Object.freeze({
   lastGptDecision: null,
   nextAction: "validate"
 });
+const SYMLINK_TEST_SKIP = process.platform === "win32" ? "requires symlink creation permission" : false;
 
 function temporaryDirectory() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hephaestus-repair-"));
@@ -250,10 +251,7 @@ test("sandboxArgs accepts a normal projectPath", () => {
   assert.equal(args[mountIndex + 1], "type=bind,src=/tmp/project,dst=/workspace,readonly");
 });
 
-test("saveState writes to the resolved real path so a symlink swap cannot redirect writes outside the project", () => {
-  if (process.platform === "win32") {
-    return;
-  }
+test("saveState writes to the resolved real path so a symlink swap cannot redirect writes outside the project", { skip: SYMLINK_TEST_SKIP }, () => {
   const directory = temporaryDirectory();
   try {
     const project = path.join(directory, "project");
@@ -266,6 +264,26 @@ test("saveState writes to the resolved real path so a symlink swap cannot redire
       (error) => assertCode(error, "OUTSIDE_ALLOWED_ROOT")
     );
     assert.equal(fs.readFileSync(outside, "utf8"), "{}\n");
+    assert.equal(fs.lstatSync(path.join(project, "STATE.json")).isSymbolicLink(), true);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("saveState refuses an in-project STATE.json symlink instead of following it", { skip: SYMLINK_TEST_SKIP }, () => {
+  const directory = temporaryDirectory();
+  try {
+    const project = path.join(directory, "project");
+    fs.mkdirSync(project);
+    const alternate = path.join(project, "alternate-state.json");
+    fs.writeFileSync(alternate, "{}\n");
+    fs.symlinkSync(alternate, path.join(project, "STATE.json"));
+    assert.throws(
+      () => saveState(project, validState),
+      (error) => assertCode(error, "OUTSIDE_ALLOWED_ROOT")
+    );
+    assert.equal(fs.readFileSync(alternate, "utf8"), "{}\n");
+    assert.equal(fs.lstatSync(path.join(project, "STATE.json")).isSymbolicLink(), true);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -279,6 +297,20 @@ test("saveState bootstraps STATE.json into the resolved real project path when n
     saveState(project, validState);
     const written = JSON.parse(fs.readFileSync(path.join(project, "STATE.json"), "utf8"));
     assert.equal(written.currentPhase, validState.currentPhase);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("saveState updates an existing normal STATE.json", () => {
+  const directory = temporaryDirectory();
+  try {
+    const project = path.join(directory, "project");
+    fs.mkdirSync(project);
+    fs.writeFileSync(path.join(project, "STATE.json"), `${JSON.stringify(validState)}\n`);
+    const updatedState = { ...validState, nextAction: "updated" };
+    saveState(project, updatedState);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project, "STATE.json"), "utf8")), updatedState);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
