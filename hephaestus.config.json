@@ -1,0 +1,5 @@
+{
+  "allowedRoot": "./fixtures/projects",
+  "registryPath": "./projects.json",
+  "logDirectory": "./logs"
+}

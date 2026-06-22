@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+test/tmp-*/
+logs/
+.runtime/
+.cache/
+tmp/
+node-v*-linux-*.tar.*
+node-v*-SHASUMS256.txt

@@ -1,0 +1,15 @@
+{
+  "nextAction": "implement-approved-change",
+  "rationale": "The mocked decision has enough context to proceed with the declared task.",
+  "allowedFiles": [
+    "src/example.js",
+    "test/example.test.js"
+  ],
+  "requiredTests": [
+    "npm test"
+  ],
+  "stopConditions": [
+    "Stop if a required project file is missing.",
+    "Stop if tests cannot run."
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "providerFailure": true,
+  "message": "Mock provider is temporarily unavailable.",
+  "retryable": true
+}

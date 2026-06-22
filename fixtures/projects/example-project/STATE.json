@@ -1,0 +1,16 @@
+{
+  "currentPhase": "0",
+  "currentTask": "repository-safety-skeleton",
+  "currentBranch": "main",
+  "currentPr": null,
+  "assignedAgent": null,
+  "attemptCount": 0,
+  "blocked": false,
+  "usageLimitPaused": false,
+  "lastSuccessfulStep": null,
+  "reviewStatus": "not-started",
+  "mergeStatus": "not-started",
+  "containerStatus": "not-started",
+  "lastGptDecision": null,
+  "nextAction": "validate-phase-0"
+}
