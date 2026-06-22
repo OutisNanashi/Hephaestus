@@ -8,6 +8,7 @@ import { inspectProject, saveInspectionReport, toInspectionSummary } from "./ins
 import { runMockCycle } from "./mock-cycle.js";
 import { runSandboxCommand } from "./sandbox.js";
 import { runAgentTask } from "./agent.js";
+import { verifyTestEvidence } from "./test-gate.js";
 import { validateProjectDirectory } from "./project.js";
 import { getProject, loadProjectRegistry } from "./registry.js";
 
@@ -48,7 +49,7 @@ export function run(argv) {
     process.stdout.write(`${HELP}\n`);
     return 0;
   }
-  if (command !== "validate" && command !== "inspect" && command !== "cycle" && command !== "sandbox-run" && command !== "agent-run") throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  if (command !== "validate" && command !== "inspect" && command !== "cycle" && command !== "sandbox-run" && command !== "agent-run" && command !== "verify-tests") throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   const config = loadConfig(path.resolve(configPath));
   const projects = loadProjectRegistry(config.registryPath, config.allowedRoot);
@@ -108,6 +109,12 @@ export function run(argv) {
       nextAction: result.state.nextAction
     }, null, 2)}\n`);
     return result.status === "completed" ? 0 : 1;
+  }
+
+  if (command === "verify-tests") {
+    const result = verifyTestEvidence(project.path);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.status === "passed" ? 0 : 1;
   }
 
   validateProjectDirectory(config.allowedRoot, project.path);
