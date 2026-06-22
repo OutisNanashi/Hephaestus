@@ -81,10 +81,14 @@ function captureOutput(action) {
   return output;
 }
 
+function normalizeLineEndings(value) {
+  return value.replace(/\r\n/gu, "\n");
+}
+
 test("reads a valid project fixture", () => {
   const projectPath = path.resolve("fixtures/projects/example-project");
   const projectState = inspectProject(path.resolve("fixtures/projects"), projectPath);
-  assert.equal(projectState.documents.plan, "# Example project\n\nThis fixture exists solely to prove Phase 0 project-file validation.\n");
+  assert.equal(normalizeLineEndings(projectState.documents.plan), "# Example project\n\nThis fixture exists solely to prove Phase 0 project-file validation.\n");
   assert.equal(projectState.documents.agentOutput, null);
   assert.equal(projectState.documents.reviewNotes, null);
 });
