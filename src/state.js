@@ -65,6 +65,19 @@ function rejectStateSymlink(statePath) {
   }
 }
 
+function existingStateMode(statePath) {
+  try {
+    const stateInfo = fs.lstatSync(statePath);
+    if (stateInfo.isSymbolicLink()) {
+      fail("STATE.json must not be a symbolic link.", "OUTSIDE_ALLOWED_ROOT");
+    }
+    return stateInfo.mode & 0o777;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return undefined;
+  }
+}
+
 /** Persist only a state object that still satisfies the Phase 0 schema. */
 export function saveState(projectPath, state) {
   const validatedState = validateState(state);
@@ -73,9 +86,15 @@ export function saveState(projectPath, state) {
   let temporaryDirectory;
   try {
     rejectStateSymlink(statePath);
+    const stateMode = existingStateMode(statePath);
     temporaryDirectory = fs.mkdtempSync(path.join(resolvedProjectPath, ".state-write-"));
     const temporaryStatePath = path.join(temporaryDirectory, "STATE.json");
-    fs.writeFileSync(temporaryStatePath, `${JSON.stringify(validatedState, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    fs.writeFileSync(temporaryStatePath, `${JSON.stringify(validatedState, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      ...(stateMode === undefined ? {} : { mode: stateMode })
+    });
+    if (stateMode !== undefined) fs.chmodSync(temporaryStatePath, stateMode);
     rejectStateSymlink(statePath);
     fs.renameSync(temporaryStatePath, statePath);
   } catch (error) {

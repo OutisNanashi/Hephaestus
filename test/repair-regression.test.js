@@ -316,6 +316,28 @@ test("saveState updates an existing normal STATE.json", () => {
   }
 });
 
+test("saveState preserves restrictive permissions on an existing normal STATE.json", { skip: process.platform === "win32" ? "POSIX file modes are not available" : false }, (t) => {
+  const directory = temporaryDirectory();
+  try {
+    const project = path.join(directory, "project");
+    fs.mkdirSync(project);
+    const statePath = path.join(project, "STATE.json");
+    fs.writeFileSync(statePath, `${JSON.stringify(validState)}\n`, { mode: 0o600 });
+    fs.chmodSync(statePath, 0o600);
+
+    if ((fs.statSync(statePath).mode & 0o777) !== 0o600) {
+      t.skip("filesystem does not honor POSIX chmod");
+      return;
+    }
+
+    saveState(project, { ...validState, nextAction: "preserve-mode" });
+
+    assert.equal(fs.statSync(statePath).mode & 0o777, 0o600);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("test-gate validates report path before fs.existsSync (source order check)", () => {
   const source = fs.readFileSync(path.resolve("src/test-gate.js"), "utf8");
   const readJsonStart = source.indexOf("function readJson");
