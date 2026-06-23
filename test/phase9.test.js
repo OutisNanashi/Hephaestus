@@ -164,6 +164,24 @@ test("real transport failures are captured without throwing and no real network 
   assert.equal(result.failureReason.includes("not-for-telegram"), false);
 });
 
+test("stalled Telegram sends time out, abort the injected request, and fail gracefully", async () => {
+  let signal;
+  const transport = createTelegramTransport({
+    enabled: true,
+    botToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    chatId: "42",
+    timeoutMs: 10,
+    fetchImpl: async (_url, options) => {
+      signal = options.signal;
+      return new Promise(() => {});
+    }
+  });
+  const result = await dispatchNotification({ event: event(), transport });
+  assert.equal(result.status, "failed");
+  assert.match(result.failureReason, /timed out after 10ms/u);
+  assert.equal(signal.aborted, true);
+});
+
 test("notification reports are deterministic per dedupe key and invalid events are rejected", async () => {
   const context = projectContext();
   try {
@@ -178,18 +196,46 @@ test("notification reports are deterministic per dedupe key and invalid events a
   }
 });
 
+test("notification report writes reject symlink targets without following them", async () => {
+  const context = projectContext();
+  try {
+    const item = event({ dedupeKey: "phase9-symlink-report" });
+    const result = await dispatchNotification({ event: item, transport: fakeTransport() });
+    const directory = path.join(context.project, "out", "notification_reports");
+    const destination = path.join(directory, "phase9-symlink-report.json");
+    const outside = path.join(context.directory, "outside.json");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(outside, "unchanged\n");
+    fs.symlinkSync(outside, destination);
+    assert.throws(() => saveNotificationReport(context.project, result), (error) => code(error, "OUTSIDE_ALLOWED_ROOT"));
+    assert.equal(fs.readFileSync(outside, "utf8"), "unchanged\n");
+  } finally {
+    fs.rmSync(context.directory, { recursive: true, force: true });
+  }
+});
+
 test("notify render CLI is fixture-only and cannot send a Telegram message", () => {
   const context = cliContext();
   let output = "";
+  let fetchCalled = false;
+  const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890ABCDE";
   const original = process.stdout.write;
+  const originalFetch = globalThis.fetch;
   process.stdout.write = (chunk) => { output += chunk; return true; };
+  globalThis.fetch = () => { fetchCalled = true; throw new Error("network must not run"); };
   try {
+    fs.writeFileSync(path.join(context.directory, "projects", "notification-fixtures", "event.json"), `${JSON.stringify(event({ reason: `token=${secret}`, requiredAction: `Bearer ${secret}` }))}\n`);
     assert.equal(run(["notify", "render", "demo", "--config", context.config, "--fixture", "notification-fixtures/event.json"]), 0);
   } finally {
     process.stdout.write = original;
+    globalThis.fetch = originalFetch;
     fs.rmSync(context.directory, { recursive: true, force: true });
   }
   const parsed = JSON.parse(output);
   assert.equal(parsed.mode, "render-only");
   assert.match(parsed.message, /Manual action required/u);
+  assert.equal(fetchCalled, false);
+  assert.equal(output.includes(secret), false);
+  assert.match(parsed.event.reason, /\[REDACTED\]/u);
+  assert.match(parsed.event.requiredAction, /\[REDACTED\]/u);
 });

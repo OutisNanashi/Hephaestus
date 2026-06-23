@@ -16,7 +16,7 @@ import { getProject, loadProjectRegistry } from "./registry.js";
 import { ingestReviewFixture } from "./review.js";
 import { createMergeRelay, evaluateMergeReadiness, saveMergeReadinessReport } from "./merge-gate.js";
 import { resolveSafePath } from "./safe-path.js";
-import { createNotificationEvent, renderNotification } from "./notification.js";
+import { createNotificationEvent, redactNotificationEvent, renderNotification } from "./notification.js";
 
 const HELP = `Hephaestus Phase 9\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n\nCommands:\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n\nSafety:\n  Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
 
@@ -137,7 +137,7 @@ export function run(argv) {
     project = getProject(projects, target);
     validateProjectDirectory(config.allowedRoot, project.path);
     const event = createNotificationEvent(notificationFixture(config.allowedRoot, fixturePath));
-    process.stdout.write(`${JSON.stringify({ mode: "render-only", event, message: renderNotification(event) }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ mode: "render-only", event: redactNotificationEvent(event), message: renderNotification(event) }, null, 2)}\n`);
     return 0;
   }
   if (mergeCommand) {

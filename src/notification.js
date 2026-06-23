@@ -107,23 +107,39 @@ function result(status, event, fields = {}) {
 }
 
 /** Build an explicit opt-in Telegram transport. Disabled and incomplete configuration never sends network traffic. */
-export function createTelegramTransport({ enabled = false, botToken = null, chatId = null, fetchImpl = globalThis.fetch } = {}) {
+export function createTelegramTransport({ enabled = false, botToken = null, chatId = null, fetchImpl = globalThis.fetch, timeoutMs = 10_000 } = {}) {
   const configured = enabled === true && typeof botToken === "string" && botToken.trim() !== "" && typeof chatId === "string" && chatId.trim() !== "";
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) fail("Telegram timeoutMs must be a positive integer.", "INVALID_NOTIFICATION_CONFIG");
   return Object.freeze({
     async send(message) {
       const safeMessage = redactSecrets(text(message, "Notification message", "INVALID_NOTIFICATION_MESSAGE"));
       if (!configured) return Object.freeze({ status: "skipped", failureReason: enabled ? "telegram configuration missing" : "telegram disabled", message: safeMessage });
       if (typeof fetchImpl !== "function") return Object.freeze({ status: "failed", failureReason: "telegram fetch unavailable", message: safeMessage });
+      const controller = new AbortController();
+      let timeoutId;
+      let timedOut = false;
       try {
-        const response = await fetchImpl(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        const request = fetchImpl(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
+          signal: controller.signal,
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, text: safeMessage, disable_web_page_preview: true })
         });
+        const timeout = new Promise((resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+            reject(new Error(`telegram request timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        });
+        const response = await Promise.race([request, timeout]);
         if (!response?.ok) return Object.freeze({ status: "failed", failureReason: `telegram request failed with status ${response?.status ?? "unknown"}`, message: safeMessage });
         return Object.freeze({ status: "sent", failureReason: null, message: safeMessage });
       } catch (error) {
-        return Object.freeze({ status: "failed", failureReason: redactSecrets(error instanceof Error ? error.message : String(error)), message: safeMessage });
+        const reason = timedOut ? `telegram request timed out after ${timeoutMs}ms` : error instanceof Error ? error.message : String(error);
+        return Object.freeze({ status: "failed", failureReason: redactSecrets(reason), message: safeMessage });
+      } finally {
+        clearTimeout(timeoutId);
       }
     }
   });
@@ -156,7 +172,20 @@ export function saveNotificationReport(projectPath, notificationResult) {
   const destination = path.join(directory, `${notificationResult.event.dedupeKey}.json`);
   const safeDestination = path.resolve(destination);
   if (!safeDestination.startsWith(`${path.resolve(directory)}${path.sep}`)) fail("Notification report path is unsafe.", "OUTSIDE_ALLOWED_ROOT");
-  if (fs.existsSync(safeDestination) && fs.lstatSync(safeDestination).isSymbolicLink()) fail("Notification report must not be a symbolic link.", "OUTSIDE_ALLOWED_ROOT");
-  fs.writeFileSync(safeDestination, `${JSON.stringify({ ...notificationResult, event: redactNotificationEvent(notificationResult.event) }, null, 2)}\n`, "utf8");
+  const payload = `${JSON.stringify({ ...notificationResult, event: redactNotificationEvent(notificationResult.event) }, null, 2)}\n`;
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(safeDestination, flags, 0o600);
+    fs.writeSync(descriptor, payload, null, "utf8");
+  } catch (error) {
+    if (error?.code === "ELOOP" || (error?.code === "EEXIST" && fs.existsSync(safeDestination) && fs.lstatSync(safeDestination).isSymbolicLink())) {
+      fail("Notification report must not be a symbolic link.", "OUTSIDE_ALLOWED_ROOT");
+    }
+    if (error?.code === "EEXIST") fail("Notification report already exists.", "NOTIFICATION_REPORT_EXISTS");
+    throw error;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
   return safeDestination;
 }
