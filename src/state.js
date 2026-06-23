@@ -8,7 +8,22 @@ const REQUIRED_STATE_KEYS = [
   "attemptCount", "blocked", "usageLimitPaused", "lastSuccessfulStep", "reviewStatus",
   "mergeStatus", "containerStatus", "lastGptDecision", "nextAction"
 ];
+const OPTIONAL_STATE_KEYS = new Set(["review"]);
 const STRING_OR_NULL_KEYS = new Set(["currentPr", "assignedAgent", "lastSuccessfulStep", "lastGptDecision"]);
+
+function validateReviewDetails(review) {
+  const keys = ["attempted", "ingestionStatus", "unresolvedBlockers", "dismissedCount", "resolvedCount", "activeSources", "unavailableSources", "mergeBlocked", "ingestedAt", "failureReason"];
+  if (review === null || Array.isArray(review) || typeof review !== "object") fail("STATE.json review must be an object.", "INVALID_STATE");
+  if (keys.some((key) => !(key in review)) || Object.keys(review).some((key) => !keys.includes(key))) fail("STATE.json review has an invalid schema.", "INVALID_STATE");
+  if (typeof review.attempted !== "boolean" || typeof review.mergeBlocked !== "boolean") fail("STATE.json review flags must be booleans.", "INVALID_STATE");
+  if (!["succeeded", "failed"].includes(review.ingestionStatus)) fail("STATE.json review ingestionStatus is invalid.", "INVALID_STATE");
+  for (const key of ["unresolvedBlockers", "dismissedCount", "resolvedCount"]) if (!Number.isSafeInteger(review[key]) || review[key] < 0) fail(`STATE.json review ${key} must be a non-negative integer.`, "INVALID_STATE");
+  for (const key of ["activeSources", "unavailableSources"]) {
+    if (!Array.isArray(review[key]) || review[key].some((value) => typeof value !== "string" || value.trim() === "") || new Set(review[key]).size !== review[key].length) fail(`STATE.json review ${key} must be a unique string array.`, "INVALID_STATE");
+  }
+  for (const key of ["ingestedAt", "failureReason"]) if (review[key] !== null && (typeof review[key] !== "string" || review[key].trim() === "")) fail(`STATE.json review ${key} must be a string or null.`, "INVALID_STATE");
+  return Object.freeze({ ...review, activeSources: Object.freeze([...review.activeSources]), unavailableSources: Object.freeze([...review.unavailableSources]) });
+}
 
 export function validateState(state) {
   if (state === null || Array.isArray(state) || typeof state !== "object") {
@@ -20,7 +35,7 @@ export function validateState(state) {
     }
   }
   for (const key of Object.keys(state)) {
-    if (!REQUIRED_STATE_KEYS.includes(key)) {
+    if (!REQUIRED_STATE_KEYS.includes(key) && !OPTIONAL_STATE_KEYS.has(key)) {
       fail(`STATE.json contains unsupported key: ${key}.`, "INVALID_STATE");
     }
   }
@@ -36,7 +51,8 @@ export function validateState(state) {
       fail(`STATE.json ${key} must be a non-empty string.`, "INVALID_STATE");
     }
   }
-  return Object.freeze({ ...state });
+  const review = "review" in state ? validateReviewDetails(state.review) : undefined;
+  return Object.freeze({ ...state, ...(review === undefined ? {} : { review }) });
 }
 
 export function loadState(projectPath) {

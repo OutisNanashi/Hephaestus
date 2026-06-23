@@ -12,8 +12,9 @@ import { verifyTestEvidence } from "./test-gate.js";
 import { commitTask, createTaskBranch, fixturePr, recordGitMetadata } from "./git-workflow.js";
 import { validateProjectDirectory } from "./project.js";
 import { getProject, loadProjectRegistry } from "./registry.js";
+import { ingestReviewFixture } from "./review.js";
 
-const HELP = `Hephaestus Phase 6\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n\nCommands:\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n\nSafety:\n  Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox.`;
+const HELP = `Hephaestus Phase 7\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n\nCommands:\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n\nSafety:\n  Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox.`;
 
 function takeOptionValue(args, option) {
   if (args.length === 0) {
@@ -39,7 +40,11 @@ function parseArguments(argv) {
   let task;
   let message;
   let provider;
+  let fixturePath;
   const command = args.shift();
+  const reviewSubcommand = command === "review" ? args.shift() : undefined;
+  let reviewProjectId;
+  if (command === "review" && args[0] && !args[0].startsWith("--")) reviewProjectId = args.shift();
   while (args.length > 0) {
     const option = args.shift();
     if (option === "--config") configPath = takeOptionValue(args, option);
@@ -53,22 +58,40 @@ function parseArguments(argv) {
     else if (option === "--task") task = takeOptionValue(args, option);
     else if (option === "--message") message = takeOptionValue(args, option);
     else if (option === "--provider") provider = takeOptionValue(args, option);
+    else if (option === "--fixture") fixturePath = takeOptionValue(args, option);
     else throw new HephaestusError(`Unknown option: ${option}.`, "INVALID_ARGUMENT");
   }
-  return { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider };
+  return { command, reviewSubcommand, reviewProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath };
 }
 
 export function run(argv) {
-  const { command, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider } = parseArguments(argv);
+  const { command, reviewSubcommand, reviewProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath } = parseArguments(argv);
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(`${HELP}\n`);
     return 0;
   }
-  if (!["validate","inspect","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command)) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  const reviewIngest = command === "review" && reviewSubcommand === "ingest";
+  if (!["validate","inspect","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   const config = loadConfig(path.resolve(configPath));
   const projects = loadProjectRegistry(config.registryPath, config.allowedRoot);
-  const project = getProject(projects, projectId ?? projects[0]?.id);
+  let project;
+  if (reviewIngest) {
+    if (reviewProjectId && projectId && reviewProjectId !== projectId) {
+      throw new HephaestusError("review ingest received conflicting project targets.", "INVALID_ARGUMENT");
+    }
+    const reviewTarget = reviewProjectId ?? projectId;
+    if (!reviewTarget) {
+      throw new HephaestusError("review ingest requires an explicit <project-name> or --project target.", "INVALID_ARGUMENT");
+    }
+    if (!fixturePath) throw new HephaestusError("review ingest requires --fixture.", "INVALID_ARGUMENT");
+    project = getProject(projects, reviewTarget);
+    const validated = validateProjectDirectory(config.allowedRoot, project.path);
+    const result = ingestReviewFixture({ allowedRoot: config.allowedRoot, projectPath: validated.path, fixturePath, state: validated.state });
+    process.stdout.write(`${JSON.stringify({ status: result.status, duplicateCount: result.duplicateCount ?? 0, review: result.state.review, notesPath: result.notesPath ?? null, reportPath: result.reportPath ?? null }, null, 2)}\n`);
+    return result.status === "completed" ? 0 : 1;
+  }
+  project = getProject(projects, projectId ?? projects[0]?.id);
   if (command === "inspect") {
     const projectState = inspectProject(config.allowedRoot, project.path);
     const reportPath = saveReport ? saveInspectionReport(projectState) : null;
