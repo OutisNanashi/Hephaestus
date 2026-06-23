@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-06-23T10:00:00.000Z",
+  "sources": [
+    {
+      "source": "CodeRabbit",
+      "comments": [
+        {
+          "externalId": "coderabbit-101",
+          "filePath": "src/example.js",
+          "line": 12,
+          "severity": "high",
+          "category": "correctness",
+          "body": "Handle the empty input before indexing the list.",
+          "actionable": true,
+          "url": "https://fixture.invalid/reviews/101"
+        }
+      ]
+    },
+    { "source": "Qodo", "availability": "paused" }
+  ]
+}

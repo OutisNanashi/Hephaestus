@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -14,6 +13,7 @@ import { loadProjectRegistry } from "../src/registry.js";
 import { sandboxArgs } from "../src/sandbox.js";
 import { saveState } from "../src/state.js";
 import { verifyTestEvidence } from "../src/test-gate.js";
+import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
 const validState = Object.freeze({
   currentPhase: "0",
@@ -34,11 +34,11 @@ const validState = Object.freeze({
 const SYMLINK_TEST_SKIP = process.platform === "win32" ? "requires symlink creation permission" : false;
 
 function temporaryDirectory() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "hephaestus-repair-"));
+  return writableTemporaryDirectory("hephaestus-repair-");
 }
 
 function permissionTestDirectory() {
-  return fs.mkdtempSync(path.join(path.dirname(process.cwd()), "hephaestus-permission-"));
+  return writableTemporaryDirectory("hephaestus-permission-");
 }
 
 function writeJson(filePath, value) {
@@ -370,8 +370,8 @@ test("verifyTestEvidence still surfaces missing-evidence as a domain error", () 
   }
 });
 
-test("phase 6 tests use os.tmpdir for portability", () => {
+test("phase 6 tests use the writable temporary-directory helper", () => {
   const source = fs.readFileSync(path.resolve("test/phase6.test.js"), "utf8");
-  assert.match(source, /os\.tmpdir\(\)/u);
+  assert.match(source, /writableTemporaryDirectory/u);
   assert.equal(source.includes('"/tmp/hephaestus-git-"'), false);
 });
