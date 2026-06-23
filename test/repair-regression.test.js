@@ -37,6 +37,10 @@ function temporaryDirectory() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "hephaestus-repair-"));
 }
 
+function permissionTestDirectory() {
+  return fs.mkdtempSync(path.join(path.dirname(process.cwd()), "hephaestus-permission-"));
+}
+
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
@@ -317,7 +321,7 @@ test("saveState updates an existing normal STATE.json", () => {
 });
 
 test("saveState preserves restrictive permissions on an existing normal STATE.json", { skip: process.platform === "win32" ? "POSIX file modes are not available" : false }, (t) => {
-  const directory = temporaryDirectory();
+  const directory = permissionTestDirectory();
   try {
     const project = path.join(directory, "project");
     fs.mkdirSync(project);
