@@ -8,7 +8,7 @@ const REQUIRED_STATE_KEYS = [
   "attemptCount", "blocked", "usageLimitPaused", "lastSuccessfulStep", "reviewStatus",
   "mergeStatus", "containerStatus", "lastGptDecision", "nextAction"
 ];
-const OPTIONAL_STATE_KEYS = new Set(["review"]);
+const OPTIONAL_STATE_KEYS = new Set(["review", "mergeGate"]);
 const STRING_OR_NULL_KEYS = new Set(["currentPr", "assignedAgent", "lastSuccessfulStep", "lastGptDecision"]);
 
 function validateReviewDetails(review) {
@@ -23,6 +23,25 @@ function validateReviewDetails(review) {
   }
   for (const key of ["ingestedAt", "failureReason"]) if (review[key] !== null && (typeof review[key] !== "string" || review[key].trim() === "")) fail(`STATE.json review ${key} must be a string or null.`, "INVALID_STATE");
   return Object.freeze({ ...review, activeSources: Object.freeze([...review.activeSources]), unavailableSources: Object.freeze([...review.unavailableSources]) });
+}
+
+function validateMergeResult(result) {
+  if (result === null) return null;
+  const keys = ["project", "phase", "pr", "headCommit", "mergeCommit", "actor", "mergedAt", "gateReportPath"];
+  if (!result || Array.isArray(result) || typeof result !== "object" || keys.some((key) => !(key in result)) || Object.keys(result).some((key) => !keys.includes(key))) fail("STATE.json merge result has an invalid schema.", "INVALID_STATE");
+  for (const key of keys) if (typeof result[key] !== "string" || result[key].trim() === "") fail(`STATE.json merge result ${key} must be a non-empty string.`, "INVALID_STATE");
+  return Object.freeze({ ...result });
+}
+
+function validateMergeGateDetails(mergeGate) {
+  const keys = ["readiness", "implementationRetested", "reviewRetested", "nextPhaseEligible", "mergeResult"];
+  if (!mergeGate || Array.isArray(mergeGate) || typeof mergeGate !== "object" || keys.some((key) => !(key in mergeGate)) || Object.keys(mergeGate).some((key) => !keys.includes(key))) fail("STATE.json mergeGate has an invalid schema.", "INVALID_STATE");
+  if (!new Set(["not-run", "blocked", "allowed", "merged"]).has(mergeGate.readiness)) fail("STATE.json mergeGate readiness is invalid.", "INVALID_STATE");
+  for (const key of ["implementationRetested", "reviewRetested", "nextPhaseEligible"]) if (typeof mergeGate[key] !== "boolean") fail(`STATE.json mergeGate ${key} must be a boolean.`, "INVALID_STATE");
+  const mergeResult = validateMergeResult(mergeGate.mergeResult);
+  if (mergeGate.nextPhaseEligible !== (mergeResult !== null)) fail("STATE.json mergeGate nextPhaseEligible must match merge result presence.", "INVALID_STATE");
+  if (mergeGate.readiness === "merged" && mergeResult === null) fail("STATE.json mergeGate merged readiness requires a merge result.", "INVALID_STATE");
+  return Object.freeze({ ...mergeGate, mergeResult });
 }
 
 export function validateState(state) {
@@ -52,7 +71,8 @@ export function validateState(state) {
     }
   }
   const review = "review" in state ? validateReviewDetails(state.review) : undefined;
-  return Object.freeze({ ...state, ...(review === undefined ? {} : { review }) });
+  const mergeGate = "mergeGate" in state ? validateMergeGateDetails(state.mergeGate) : undefined;
+  return Object.freeze({ ...state, ...(review === undefined ? {} : { review }), ...(mergeGate === undefined ? {} : { mergeGate }) });
 }
 
 export function loadState(projectPath) {
