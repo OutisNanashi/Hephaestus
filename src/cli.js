@@ -16,8 +16,9 @@ import { getProject, loadProjectRegistry } from "./registry.js";
 import { ingestReviewFixture } from "./review.js";
 import { createMergeRelay, evaluateMergeReadiness, saveMergeReadinessReport } from "./merge-gate.js";
 import { resolveSafePath } from "./safe-path.js";
+import { createNotificationEvent, renderNotification } from "./notification.js";
 
-const HELP = `Hephaestus Phase 8\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n\nCommands:\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n\nSafety:\n  Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Merge commands never perform a merge.`;
+const HELP = `Hephaestus Phase 9\n\nUsage:\n  hephaestus --help\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n\nCommands:\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n\nSafety:\n  Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
 
 function takeOptionValue(args, option) {
   if (args.length === 0) {
@@ -47,10 +48,13 @@ function parseArguments(argv) {
   const command = args.shift();
   const reviewSubcommand = command === "review" ? args.shift() : undefined;
   const mergeSubcommand = command === "merge" ? args.shift() : undefined;
+  const notifySubcommand = command === "notify" ? args.shift() : undefined;
   let reviewProjectId;
   let mergeProjectId;
+  let notifyProjectId;
   if (command === "review" && args[0] && !args[0].startsWith("--")) reviewProjectId = args.shift();
   if (command === "merge" && args[0] && !args[0].startsWith("--")) mergeProjectId = args.shift();
+  if (command === "notify" && args[0] && !args[0].startsWith("--")) notifyProjectId = args.shift();
   while (args.length > 0) {
     const option = args.shift();
     if (option === "--config") configPath = takeOptionValue(args, option);
@@ -67,7 +71,7 @@ function parseArguments(argv) {
     else if (option === "--fixture") fixturePath = takeOptionValue(args, option);
     else throw new HephaestusError(`Unknown option: ${option}.`, "INVALID_ARGUMENT");
   }
-  return { command, reviewSubcommand, reviewProjectId, mergeSubcommand, mergeProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath };
+  return { command, reviewSubcommand, reviewProjectId, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath };
 }
 
 function mergeFixture(allowedRoot, fixturePath) {
@@ -91,19 +95,51 @@ function mergeFixture(allowedRoot, fixturePath) {
   return parsed;
 }
 
+function notificationFixture(allowedRoot, fixturePath) {
+  if (!fixturePath) throw new HephaestusError("notify render requires --fixture.", "INVALID_ARGUMENT");
+  const file = resolveSafePath(allowedRoot, fixturePath);
+  let source;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    throw new HephaestusError(`notification fixture could not be read: ${error.message}`, "NOTIFICATION_FIXTURE_READ_FAILED");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new HephaestusError(`notification fixture contains invalid JSON: ${error.message}`, "NOTIFICATION_FIXTURE_INVALID");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new HephaestusError("notification fixture must be a JSON object.", "NOTIFICATION_FIXTURE_INVALID");
+  }
+  return parsed;
+}
+
 export function run(argv) {
-  const { command, reviewSubcommand, reviewProjectId, mergeSubcommand, mergeProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath } = parseArguments(argv);
+  const { command, reviewSubcommand, reviewProjectId, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath } = parseArguments(argv);
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(`${HELP}\n`);
     return 0;
   }
   const reviewIngest = command === "review" && reviewSubcommand === "ingest";
   const mergeCommand = command === "merge" && ["check", "relay"].includes(mergeSubcommand);
-  if (!["validate","inspect","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest && !mergeCommand) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  const notifyRender = command === "notify" && notifySubcommand === "render";
+  if (!["validate","inspect","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest && !mergeCommand && !notifyRender) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   const config = loadConfig(path.resolve(configPath));
   const projects = loadProjectRegistry(config.registryPath, config.allowedRoot);
   let project;
+  if (notifyRender) {
+    if (notifyProjectId && projectId && notifyProjectId !== projectId) throw new HephaestusError("notify render received conflicting project targets.", "INVALID_ARGUMENT");
+    const target = notifyProjectId ?? projectId;
+    if (!target) throw new HephaestusError("notify render requires an explicit <project-name> or --project target.", "INVALID_ARGUMENT");
+    project = getProject(projects, target);
+    validateProjectDirectory(config.allowedRoot, project.path);
+    const event = createNotificationEvent(notificationFixture(config.allowedRoot, fixturePath));
+    process.stdout.write(`${JSON.stringify({ mode: "render-only", event, message: renderNotification(event) }, null, 2)}\n`);
+    return 0;
+  }
   if (mergeCommand) {
     if (mergeProjectId && projectId && mergeProjectId !== projectId) throw new HephaestusError("merge command received conflicting project targets.", "INVALID_ARGUMENT");
     const target = mergeProjectId ?? projectId;

@@ -1,0 +1,195 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { run } from "../src/cli.js";
+import { HephaestusError } from "../src/errors.js";
+import {
+  NotificationDeduper,
+  createNotificationEvent,
+  createTelegramTransport,
+  createTelegramTransportFromEnvironment,
+  dispatchNotification,
+  renderNotification,
+  saveNotificationReport
+} from "../src/notification.js";
+import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
+
+const timestamp = "2026-06-23T12:00:00.000Z";
+const types = ["manual_blocker", "phase_completed", "merge_completed", "usage_limit", "agent_failure", "container_failure"];
+
+function event(overrides = {}) {
+  return {
+    type: "manual_blocker",
+    project: "hephaestus",
+    phase: "9",
+    status: "blocked",
+    reason: "Telegram configuration requires user attention.",
+    requiredAction: "Set the configured environment references.",
+    timestamp,
+    ...overrides
+  };
+}
+
+function fakeTransport(result = { status: "sent", failureReason: null }) {
+  const messages = [];
+  return {
+    messages,
+    async send(message) {
+      messages.push(message);
+      return result;
+    }
+  };
+}
+
+function projectContext() {
+  const directory = writableTemporaryDirectory("hephaestus-phase9-");
+  const project = path.join(directory, "demo");
+  fs.mkdirSync(project);
+  fs.writeFileSync(path.join(project, "BUILD_LOG.md"), "# Build log\n\nExisting entry.\n");
+  return { directory, project };
+}
+
+function cliContext() {
+  const directory = writableTemporaryDirectory("hephaestus-phase9-cli-");
+  const root = path.join(directory, "projects");
+  const project = path.join(root, "demo");
+  fs.mkdirSync(project, { recursive: true });
+  for (const name of ["PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "CURRENT_TASK.md"]) fs.writeFileSync(path.join(project, name), "fixture\n");
+  fs.writeFileSync(path.join(project, "STATE.json"), `${JSON.stringify({ currentPhase: "9", currentTask: "notifications", currentBranch: "phase9", currentPr: null, assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started", containerStatus: "healthy", lastGptDecision: null, nextAction: "notify" })}\n`);
+  const fixtures = path.join(root, "notification-fixtures");
+  fs.mkdirSync(fixtures, { recursive: true });
+  fs.writeFileSync(path.join(fixtures, "event.json"), `${JSON.stringify(event())}\n`);
+  const config = path.join(directory, "config.json");
+  fs.writeFileSync(config, `${JSON.stringify({ allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" })}\n`);
+  fs.writeFileSync(path.join(directory, "projects.json"), `${JSON.stringify({ projects: [{ id: "demo", path: "demo" }] })}\n`);
+  return { directory, config };
+}
+
+function code(error, expected) {
+  assert.ok(error instanceof HephaestusError);
+  assert.equal(error.code, expected);
+  return true;
+}
+
+test("all required notification event types render concise user-facing templates", () => {
+  const headings = {
+    manual_blocker: "Manual action required",
+    phase_completed: "Phase completed",
+    merge_completed: "Merge completed",
+    usage_limit: "Usage limit reached",
+    agent_failure: "Agent failure",
+    container_failure: "Container failure"
+  };
+  for (const type of types) {
+    const rendered = renderNotification(event({ type, reason: `${type} reason` }));
+    assert.match(rendered, /\[hephaestus\] phase 9/u);
+    assert.match(rendered, new RegExp(headings[type], "u"));
+  }
+  const blocker = renderNotification(event());
+  assert.match(blocker, /Action: Set the configured environment references\./u);
+});
+
+test("ordinary internal logs are rejected and never reach a transport", async () => {
+  const transport = fakeTransport();
+  assert.throws(() => createNotificationEvent(event({ type: "internal_log" })), (error) => code(error, "INVALID_NOTIFICATION_EVENT"));
+  assert.equal(transport.messages.length, 0);
+});
+
+test("duplicate events are skipped after a first successful delivery", async () => {
+  const transport = fakeTransport();
+  const deduper = new NotificationDeduper();
+  const first = await dispatchNotification({ event: event(), transport, deduper });
+  const second = await dispatchNotification({ event: event(), transport, deduper });
+  assert.equal(first.status, "sent");
+  assert.equal(second.status, "skipped");
+  assert.equal(second.deduplicated, true);
+  assert.equal(transport.messages.length, 1);
+});
+
+test("credential-like values are redacted before notification text is rendered", () => {
+  const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890ABCDE";
+  const telegram = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+  const rendered = renderNotification(event({ reason: `GitHub token=${secret}; telegram=${telegram}`, requiredAction: "Use Bearer abcdefghijklmnopqrstuvwxyz0123456789ABCD" }));
+  assert.equal(rendered.includes(secret), false);
+  assert.equal(rendered.includes(telegram), false);
+  assert.equal(rendered.includes("abcdefghijklmnopqrstuvwxyz0123456789ABCD"), false);
+  assert.match(rendered, /\[REDACTED\]/u);
+});
+
+test("failed sends are graceful and their persisted report redacts failures without touching BUILD_LOG", async () => {
+  const context = projectContext();
+  const secret = "super-secret-value-abcdefghijklmnopqrstuvwxyz123456";
+  try {
+    const result = await dispatchNotification({
+      event: event({ reason: `password=${secret}` }),
+      transport: fakeTransport({ status: "failed", failureReason: `Bearer ${secret}` })
+    });
+    assert.equal(result.status, "failed");
+    const report = saveNotificationReport(context.project, result);
+    const content = fs.readFileSync(report, "utf8");
+    assert.equal(content.includes(secret), false);
+    assert.match(content, /\[REDACTED\]/u);
+    assert.equal(fs.readFileSync(path.join(context.project, "BUILD_LOG.md"), "utf8"), "# Build log\n\nExisting entry.\n");
+  } finally {
+    fs.rmSync(context.directory, { recursive: true, force: true });
+  }
+});
+
+test("missing Telegram configuration is a safe no-op and does not invoke fetch", async () => {
+  let called = false;
+  const transport = createTelegramTransportFromEnvironment({ enabled: true, botTokenEnv: "TELEGRAM_BOT_TOKEN", chatIdEnv: "TELEGRAM_CHAT_ID" }, {}, async () => {
+    called = true;
+    throw new Error("network must not run");
+  });
+  const result = await dispatchNotification({ event: event(), transport });
+  assert.equal(result.status, "skipped");
+  assert.equal(called, false);
+});
+
+test("real transport failures are captured without throwing and no real network call occurs in tests", async () => {
+  let called = false;
+  const transport = createTelegramTransport({
+    enabled: true,
+    botToken: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    chatId: "42",
+    fetchImpl: async () => {
+      called = true;
+      throw new Error("network password=not-for-telegram");
+    }
+  });
+  const result = await dispatchNotification({ event: event(), transport });
+  assert.equal(called, true);
+  assert.equal(result.status, "failed");
+  assert.equal(result.failureReason.includes("not-for-telegram"), false);
+});
+
+test("notification reports are deterministic per dedupe key and invalid events are rejected", async () => {
+  const context = projectContext();
+  try {
+    const item = event({ dedupeKey: "phase9-demo-blocker" });
+    const result = await dispatchNotification({ event: item, transport: fakeTransport() });
+    const report = saveNotificationReport(context.project, result);
+    assert.equal(path.basename(report), "phase9-demo-blocker.json");
+    assert.equal(JSON.parse(fs.readFileSync(report, "utf8")).status, "sent");
+    assert.throws(() => createNotificationEvent(event({ dedupeKey: "../unsafe" })), (error) => code(error, "INVALID_NOTIFICATION_EVENT"));
+  } finally {
+    fs.rmSync(context.directory, { recursive: true, force: true });
+  }
+});
+
+test("notify render CLI is fixture-only and cannot send a Telegram message", () => {
+  const context = cliContext();
+  let output = "";
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => { output += chunk; return true; };
+  try {
+    assert.equal(run(["notify", "render", "demo", "--config", context.config, "--fixture", "notification-fixtures/event.json"]), 0);
+  } finally {
+    process.stdout.write = original;
+    fs.rmSync(context.directory, { recursive: true, force: true });
+  }
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.mode, "render-only");
+  assert.match(parsed.message, /Manual action required/u);
+});
