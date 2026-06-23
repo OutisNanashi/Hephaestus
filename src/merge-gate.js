@@ -18,6 +18,7 @@ function add(blockers, code, source, message, requiredAction) {
 
 function text(value) { return typeof value === "string" && value.trim() !== ""; }
 function same(a, b) { return String(a) === String(b); }
+function validProjectId(value) { return text(value) && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value); }
 
 function reviewItems(projectPath) {
   const file = path.join(projectPath, "out", "review_reports", "review-items.json");
@@ -66,6 +67,7 @@ function inspectApproval(approval, input, blockers, now) {
 }
 
 function inspectMetadata(input, state, blockers) {
+  if (!validProjectId(input.project)) add(blockers, "MISSING_PROJECT_METADATA", "state", "Project identifier is missing or invalid.", "Provide a valid target project identifier.");
   if (!input.pr || !Number.isSafeInteger(input.pr.number) || !text(input.pr.url) || !text(input.pr.headBranch) || !text(input.pr.baseBranch) || !text(input.pr.headCommit)) add(blockers, "MISSING_PR_METADATA", "git", "PR metadata is incomplete.", "Provide complete PR metadata from a trusted source.");
   else {
     if (input.pr.status !== "OPEN") add(blockers, input.pr.status ? "PR_NOT_OPEN" : "PR_STATUS_UNCLEAR", "git", "PR is not open or has an unclear status.", "Refresh PR state before merge.");
@@ -98,13 +100,16 @@ function mergeReportPath(projectPath, report) {
   const directory = path.join(projectPath, REPORT_DIRECTORY);
   fs.mkdirSync(directory, { recursive: true });
   assertRealPathWithinRoot(projectPath, directory);
-  const name = `phase-${report.phase}-pr-${report.pr?.number ?? "unknown"}.json`;
-  return path.join(directory, name);
+  const phase = typeof report.phase === "string" || Number.isSafeInteger(report.phase) ? String(report.phase) : "";
+  const safePhase = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(phase) && !phase.includes("..") ? phase : "unknown";
+  const safePr = Number.isSafeInteger(report.pr?.number) ? String(report.pr.number) : "unknown";
+  return path.join(directory, `phase-${safePhase}-pr-${safePr}.json`);
 }
 
 export function saveMergeReadinessReport(projectPath, report) {
   const destination = mergeReportPath(projectPath, report);
   fs.writeFileSync(destination, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  assertRealPathWithinRoot(projectPath, destination);
   return destination;
 }
 

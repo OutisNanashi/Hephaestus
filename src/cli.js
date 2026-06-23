@@ -71,13 +71,24 @@ function parseArguments(argv) {
 }
 
 function mergeFixture(allowedRoot, fixturePath) {
-  if (!fixturePath) throw new HephaestusError("merge check requires --fixture.", "INVALID_ARGUMENT");
+  if (!fixturePath) throw new HephaestusError("merge commands require --fixture.", "INVALID_ARGUMENT");
   const file = resolveSafePath(allowedRoot, fixturePath);
+  let source;
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    source = fs.readFileSync(file, "utf8");
   } catch (error) {
     throw new HephaestusError(`merge fixture could not be read: ${error.message}`, "MERGE_FIXTURE_READ_FAILED");
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new HephaestusError(`merge fixture contains invalid JSON: ${error.message}`, "MERGE_FIXTURE_INVALID");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new HephaestusError("merge fixture must be a JSON object.", "MERGE_FIXTURE_INVALID");
+  }
+  return parsed;
 }
 
 export function run(argv) {

@@ -41,6 +41,7 @@ function validateMergeGateDetails(mergeGate) {
   const mergeResult = validateMergeResult(mergeGate.mergeResult);
   if (mergeGate.nextPhaseEligible !== (mergeResult !== null)) fail("STATE.json mergeGate nextPhaseEligible must match merge result presence.", "INVALID_STATE");
   if (mergeGate.readiness === "merged" && mergeResult === null) fail("STATE.json mergeGate merged readiness requires a merge result.", "INVALID_STATE");
+  if (mergeGate.readiness !== "merged" && mergeResult !== null) fail("STATE.json mergeGate merge result is only valid when readiness is merged.", "INVALID_STATE");
   return Object.freeze({ ...mergeGate, mergeResult });
 }
 
