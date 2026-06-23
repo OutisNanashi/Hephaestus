@@ -62,11 +62,11 @@ export function runMockCycle({ allowedRoot, projectPath, mockGptPath, mockAgentO
 
   if (providerResult.kind === "failure") {
     const updatedState = failureState(projectState.state, providerResult.message, providerResult.retryable);
-    saveState(projectState.projectPath, updatedState);
     const buildLogPath = appendBuildLog(
       projectState.projectPath,
       `[phase-2-mock-cycle] status=blocked retryable=${providerResult.retryable} reason=${providerResult.message}`
     );
+    saveState(projectState.projectPath, updatedState);
     return Object.freeze({
       status: "blocked",
       projectPath: projectState.projectPath,
@@ -85,12 +85,12 @@ export function runMockCycle({ allowedRoot, projectPath, mockGptPath, mockAgentO
   const updatedState = decisionState(projectState.state, providerResult.decision);
 
   fs.writeFileSync(promptPath, `${prompt}\n`, "utf8");
-  saveState(projectState.projectPath, updatedState);
   fs.writeFileSync(agentOutputPath, mockAgentOutput.content, "utf8");
   const buildLogPath = appendBuildLog(
     projectState.projectPath,
     `[phase-2-mock-cycle] status=completed nextAction=${providerResult.decision.nextAction} prompt=${path.basename(promptPath)} agentOutput=${path.basename(mockAgentOutput.path)}`
   );
+  saveState(projectState.projectPath, updatedState);
   return Object.freeze({
     status: "completed",
     projectPath: projectState.projectPath,

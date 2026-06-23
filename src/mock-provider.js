@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { fail } from "./errors.js";
+import { fail, HephaestusError } from "./errors.js";
 import { assertRealPathWithinRoot, resolveSafePath } from "./safe-path.js";
 import { validateMockDecision } from "./brain.js";
 
@@ -11,8 +11,8 @@ function readMockFixture(allowedRoot, fixturePath, label) {
     if (!fs.statSync(safePath).isFile()) fail(`${label} fixture must be a regular file.`, "INVALID_MOCK_FIXTURE");
     return { path: safePath, content: fs.readFileSync(safePath, "utf8") };
   } catch (error) {
-    if (error.code) throw error;
-    fail(`${label} fixture could not be read: ${error.message}`, "MOCK_FIXTURE_READ_FAILED");
+    if (error instanceof HephaestusError) throw error;
+    fail(`${label} fixture could not be read: ${error?.message ?? "unknown error"}.`, "MOCK_FIXTURE_READ_FAILED");
   }
 }
 

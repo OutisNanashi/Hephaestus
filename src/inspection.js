@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fail } from "./errors.js";
+import { fail, HephaestusError } from "./errors.js";
 import { validateProjectDirectory } from "./project.js";
 import { assertRealPathWithinRoot } from "./safe-path.js";
 
@@ -21,8 +21,11 @@ function readRequiredDocument(projectPath, fileName) {
     assertRealPathWithinRoot(projectPath, filePath);
     return fs.readFileSync(filePath, "utf8");
   } catch (error) {
-    if (error.code) throw error;
-    fail(`Project is missing required file: ${fileName}.`, "MISSING_REQUIRED_PROJECT_FILE");
+    if (error instanceof HephaestusError) throw error;
+    if (error?.code === "ENOENT") {
+      fail(`Project is missing required file: ${fileName}.`, "MISSING_REQUIRED_PROJECT_FILE");
+    }
+    fail(`Project required file could not be read: ${fileName} (${error?.message ?? "unknown error"}).`, "FILE_READ_FAILED");
   }
 }
 
@@ -36,8 +39,8 @@ function readOptionalDocument(projectPath, fileName) {
     }
     return fs.readFileSync(filePath, "utf8");
   } catch (error) {
-    if (error.code) throw error;
-    fail(`Optional project file could not be read: ${fileName}.`, "FILE_READ_FAILED");
+    if (error instanceof HephaestusError) throw error;
+    fail(`Optional project file could not be read: ${fileName} (${error?.message ?? "unknown error"}).`, "FILE_READ_FAILED");
   }
 }
 

@@ -38,6 +38,9 @@ export function loadProjectRegistry(registryPath, allowedRoot) {
     if (typeof project.id !== "string" || !PROJECT_ID.test(project.id)) {
       fail(`Registry project at index ${index} has an invalid id.`, "INVALID_REGISTRY");
     }
+    if (typeof project.path !== "string" || project.path.length === 0) {
+      fail(`Registry project at index ${index} is missing a path.`, "INVALID_REGISTRY");
+    }
     if (ids.has(project.id)) {
       fail(`Project registry contains duplicate id: ${project.id}.`, "INVALID_REGISTRY");
     }

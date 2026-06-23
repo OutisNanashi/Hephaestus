@@ -43,7 +43,13 @@ export function loadConfig(configPath = path.resolve("hephaestus.config.json")) 
   }
 
   const allowedRoot = path.resolve(configDirectory, raw.allowedRoot);
-  if (!fs.existsSync(allowedRoot) || !fs.statSync(allowedRoot).isDirectory()) {
+  let allowedRootStat;
+  try {
+    allowedRootStat = fs.statSync(allowedRoot);
+  } catch (error) {
+    fail(`Configuration allowedRoot could not be inspected: ${error.message}`, "INVALID_CONFIG");
+  }
+  if (!allowedRootStat.isDirectory()) {
     fail("Configuration allowedRoot must name an existing directory.", "INVALID_CONFIG");
   }
 

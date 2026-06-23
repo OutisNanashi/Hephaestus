@@ -10,6 +10,7 @@ export const SANDBOX_IMAGE = "postgres:16-alpine";
 const SANDBOX_WORKSPACE = "/workspace";
 const SAFE_CONTAINER_ENVIRONMENT = Object.freeze({ LANG: "C.UTF-8" });
 const COMMAND_TIMEOUT_MS = 1_000;
+const DOCKER_LIFECYCLE_TIMEOUT_MS = 5_000;
 
 const ALLOWLIST = Object.freeze({
   "test-echo": Object.freeze({ script: "printf 'sandbox-ok\\n'" }),
@@ -27,7 +28,7 @@ function dockerEnvironment() {
   return { PATH: process.env.PATH };
 }
 
-function dockerResult(args, timeout = COMMAND_TIMEOUT_MS) {
+function dockerResult(args, timeout = DOCKER_LIFECYCLE_TIMEOUT_MS) {
   const result = spawnSync("docker", args, {
     encoding: "utf8",
     timeout,
@@ -46,7 +47,17 @@ function dockerResult(args, timeout = COMMAND_TIMEOUT_MS) {
   });
 }
 
-function sandboxArgs(projectPath, containerName, script) {
+function assertSafeMountPath(projectPath) {
+  if (typeof projectPath !== "string" || projectPath.length === 0) {
+    fail("Sandbox mount path must be a non-empty string.", "UNSAFE_SANDBOX_MOUNT_PATH");
+  }
+  if (/[,=\n\r\0]/u.test(projectPath)) {
+    fail("Sandbox mount path contains characters that would corrupt the Docker mount specification.", "UNSAFE_SANDBOX_MOUNT_PATH");
+  }
+}
+
+export function sandboxArgs(projectPath, containerName, script) {
+  assertSafeMountPath(projectPath);
   return [
     "run", "--name", containerName, "--rm",
     "--network", "none",
@@ -130,7 +141,8 @@ export function runSandboxCommand({ allowedRoot, projectPath, commandId }) {
   let result;
   let cleanup;
   try {
-    result = dockerResult(sandboxArgs(projectState.projectPath, name, ALLOWLIST[commandId].script));
+    const timeout = commandId === "test-timeout" ? COMMAND_TIMEOUT_MS : DOCKER_LIFECYCLE_TIMEOUT_MS;
+    result = dockerResult(sandboxArgs(projectState.projectPath, name, ALLOWLIST[commandId].script), timeout);
   } finally {
     cleanup = cleanupSandbox(name);
   }
