@@ -119,7 +119,14 @@ function merge(existing, incoming, statusExplicit) {
   if (!existing) return incoming;
   const status = statusExplicit ? incoming.status : existing.status;
   const gptDecision = status === "dismissed" && !incoming.gptDecision.dismissed ? existing.gptDecision : incoming.gptDecision;
-  const result = { ...existing, ...incoming, status, gptDecision, firstSeenAt: existing.firstSeenAt, lastSeenAt: incoming.lastSeenAt };
+  const result = {
+    ...existing, ...incoming, status, gptDecision,
+    gptDecisionRequired: gptDecision.required,
+    gptDismissed: gptDecision.dismissed,
+    dismissalReason: gptDecision.dismissalReason,
+    firstSeenAt: existing.firstSeenAt,
+    lastSeenAt: incoming.lastSeenAt
+  };
   return Object.freeze({ ...result, blocksMerge: result.actionable && result.status === "unresolved" });
 }
 function sort(items) { return [...items].sort((a, b) => a.source.localeCompare(b.source) || a.id.localeCompare(b.id)); }

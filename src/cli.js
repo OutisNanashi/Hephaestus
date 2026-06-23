@@ -75,15 +75,23 @@ export function run(argv) {
 
   const config = loadConfig(path.resolve(configPath));
   const projects = loadProjectRegistry(config.registryPath, config.allowedRoot);
-  const project = getProject(projects, projectId ?? projects[0]?.id);
+  let project;
   if (reviewIngest) {
+    if (reviewProjectId && projectId && reviewProjectId !== projectId) {
+      throw new HephaestusError("review ingest received conflicting project targets.", "INVALID_ARGUMENT");
+    }
+    const reviewTarget = reviewProjectId ?? projectId;
+    if (!reviewTarget) {
+      throw new HephaestusError("review ingest requires an explicit <project-name> or --project target.", "INVALID_ARGUMENT");
+    }
     if (!fixturePath) throw new HephaestusError("review ingest requires --fixture.", "INVALID_ARGUMENT");
-    const selectedProject = reviewProjectId ? getProject(projects, reviewProjectId) : project;
-    const validated = validateProjectDirectory(config.allowedRoot, selectedProject.path);
+    project = getProject(projects, reviewTarget);
+    const validated = validateProjectDirectory(config.allowedRoot, project.path);
     const result = ingestReviewFixture({ allowedRoot: config.allowedRoot, projectPath: validated.path, fixturePath, state: validated.state });
     process.stdout.write(`${JSON.stringify({ status: result.status, duplicateCount: result.duplicateCount ?? 0, review: result.state.review, notesPath: result.notesPath ?? null, reportPath: result.reportPath ?? null }, null, 2)}\n`);
     return result.status === "completed" ? 0 : 1;
   }
+  project = getProject(projects, projectId ?? projects[0]?.id);
   if (command === "inspect") {
     const projectState = inspectProject(config.allowedRoot, project.path);
     const reportPath = saveReport ? saveInspectionReport(projectState) : null;

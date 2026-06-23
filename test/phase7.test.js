@@ -35,6 +35,22 @@ test("duplicate comments preserve one blocker and one original first-seen timest
   } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
 
+test("deduplication keeps flattened GPT decision fields consistent with the canonical dismissal", () => {
+  const c = context(); try {
+    const dismissed = {
+      timestamp: "2026-06-23T10:00:00.000Z",
+      sources: [{ source: "GPT", comments: [{ externalId: "gpt-dismissal", body: "Style preference", actionable: false, status: "dismissed", gptDecision: { dismissed: true, reason: "Out of scope.", decidedAt: "2026-06-23T10:00:00.000Z" } }] }]
+    };
+    ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "dismissed.json", dismissed), state });
+    const duplicate = { timestamp: "2026-06-23T11:00:00.000Z", sources: [{ source: "GPT", comments: [{ externalId: "gpt-dismissal", body: "Style preference", actionable: false }] }] };
+    const result = ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "duplicate-dismissal.json", duplicate), state: loadState(c.project) });
+    const item = result.items[0];
+    assert.equal(item.status, "dismissed"); assert.equal(item.gptDecision.dismissed, true); assert.equal(item.gptDecisionRequired, item.gptDecision.required); assert.equal(item.gptDismissed, item.gptDecision.dismissed); assert.equal(item.dismissalReason, item.gptDecision.dismissalReason);
+    const stored = JSON.parse(fs.readFileSync(path.join(c.project, "out", "review_reports", "review-items.json"), "utf8")).items[0];
+    assert.equal(stored.gptDismissed, stored.gptDecision.dismissed); assert.equal(stored.dismissalReason, stored.gptDecision.dismissalReason);
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
+});
+
 test("dismissals require explicit GPT metadata and non-actionable dismissals do not block", () => {
   assert.throws(() => normalizeReviewItem({ source: "GPT", body: "Ignore this", status: "dismissed", actionable: false }, { timestamp: "2026-06-23T10:00:00.000Z" }), (error) => code(error, "MISSING_GPT_DISMISSAL_DECISION"));
   const item = normalizeReviewItem({ source: "GPT", body: "Style preference", status: "dismissed", actionable: false, gptDecision: { dismissed: true, reason: "Out of scope for this phase.", decidedAt: "2026-06-23T10:01:00.000Z" } }, { timestamp: "2026-06-23T10:00:00.000Z" });
@@ -69,5 +85,14 @@ test("review ingest CLI uses only a local fixture", () => {
     const reviewPath = fixture(c, "cli.json", base); let output = ""; const original = process.stdout.write; process.stdout.write = (chunk) => { output += chunk; return true; };
     try { assert.equal(run(["review", "ingest", "demo", "--config", c.config, "--fixture", reviewPath]), 0); } finally { process.stdout.write = original; }
     assert.equal(JSON.parse(output).review.unresolvedBlockers, 1);
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
+});
+
+test("review ingest refuses an omitted project target without writing state or notes", () => {
+  const c = context(); try {
+    const reviewPath = fixture(c, "missing-target.json", base);
+    const statePath = path.join(c.project, "STATE.json"); const stateBefore = fs.readFileSync(statePath, "utf8");
+    assert.throws(() => run(["review", "ingest", "--config", c.config, "--fixture", reviewPath]), (error) => code(error, "INVALID_ARGUMENT"));
+    assert.equal(fs.readFileSync(statePath, "utf8"), stateBefore); assert.equal(fs.existsSync(path.join(c.project, "REVIEW_NOTES.md")), false);
   } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
