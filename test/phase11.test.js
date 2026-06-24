@@ -131,6 +131,14 @@ test("dashboard CLI is read-only and remains independent of conductor actions", 
   } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
 
+test("dashboard help uses readable lines rather than literal newline text", () => {
+  const help = capture(() => assert.equal(run(["--help"]), 0));
+  assert.equal(help.includes("  hephaestus status [--config <file>]\n  hephaestus dashboard [--config <file>]"), true);
+  assert.equal(help.includes("starting work.\n  dashboard     Render a read-only"), true);
+  assert.equal(help.includes("\\n  hephaestus dashboard"), false);
+  assert.equal(help.includes("\\n  dashboard     Render"), false);
+});
+
 test("dashboard redacts obvious secrets and has deterministic output", () => {
   const c = context();
   const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890ABCDE";

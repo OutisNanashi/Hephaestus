@@ -24,8 +24,8 @@ const HELP = `Hephaestus Phase 10\n\nUsage:\n  hephaestus --help\n  hephaestus s
 
 const DASHBOARD_HELP = HELP
   .replace("Hephaestus Phase 10", "Hephaestus Phase 11")
-  .replace("  hephaestus status [--config <file>]", "  hephaestus status [--config <file>]\\n  hephaestus dashboard [--config <file>]")
-  .replace("  status        List each registered project without mutating state or starting work.", "  status        List each registered project without mutating state or starting work.\\n  dashboard     Render a read-only, redacted supervision view; it cannot control projects.")
+  .replace("  hephaestus status [--config <file>]", "  hephaestus status [--config <file>]\n  hephaestus dashboard [--config <file>]")
+  .replace("  status        List each registered project without mutating state or starting work.", "  status        List each registered project without mutating state or starting work.\n  dashboard     Render a read-only, redacted supervision view; it cannot control projects.")
   .replace("Project status is read-only.", "Project status and dashboard output are read-only.");
 
 function takeOptionValue(args, option) {
