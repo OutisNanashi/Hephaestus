@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { run } from "../src/cli.js";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, loadLocalEnvironment } from "../src/config.js";
 import { HephaestusError } from "../src/errors.js";
 import { ensureProjectLogDirectory } from "../src/logging.js";
 import { validateProjectDirectory } from "../src/project.js";
@@ -70,6 +70,52 @@ test("config loading resolves a valid allowed root and local support paths", () 
     writeJson(path.join(directory, "bad.json"), { allowedRoot: "./projects", registryPath: "./registry.json" });
     assert.throws(() => loadConfig(path.join(directory, "bad.json")), (error) => assertCode(error, "INVALID_CONFIG"));
   } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("local .env values load through configuration without writing secrets to output", () => {
+  const directory = temporaryDirectory();
+  const envName = "HEPHAESTUS_LOCAL_ENV_TEST";
+  const secretName = "HEPHAESTUS_LOCAL_ENV_SECRET";
+  const secret = `local-secret-${"x".repeat(48)}`;
+  let output = "";
+  const originalWrite = process.stdout.write;
+  const originalErrorWrite = process.stderr.write;
+  delete process.env[envName];
+  delete process.env[secretName];
+  process.stdout.write = (chunk) => { output += chunk; return true; };
+  process.stderr.write = (chunk) => { output += chunk; return true; };
+  try {
+    const allowedRoot = path.join(directory, "projects");
+    fs.mkdirSync(allowedRoot);
+    writeJson(path.join(directory, "config.json"), { allowedRoot: "./projects", registryPath: "./registry.json", logDirectory: "./logs" });
+    fs.writeFileSync(path.join(directory, ".env"), `# local values\n${envName}=loaded\n${secretName}=${secret}\n`);
+    loadConfig(path.join(directory, "config.json"));
+    assert.equal(process.env[envName], "loaded");
+    assert.equal(process.env[secretName].length, secret.length);
+  } finally {
+    process.stdout.write = originalWrite;
+    process.stderr.write = originalErrorWrite;
+    delete process.env[envName];
+    delete process.env[secretName];
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  assert.equal(output, "");
+});
+
+test("local .env loading preserves existing values and safely ignores a missing file", () => {
+  const directory = temporaryDirectory();
+  const envName = "HEPHAESTUS_LOCAL_ENV_EXISTING";
+  process.env[envName] = "already-set";
+  try {
+    const envFile = path.join(directory, ".env");
+    fs.writeFileSync(envFile, `${envName}=from-file\n`);
+    assert.deepEqual(loadLocalEnvironment(envFile), []);
+    assert.equal(process.env[envName], "already-set");
+    assert.doesNotThrow(() => loadLocalEnvironment(path.join(directory, "absent.env")));
+  } finally {
+    delete process.env[envName];
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

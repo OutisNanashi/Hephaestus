@@ -1,4 +1,6 @@
 node_modules/
+.env
+.env.local
 coverage/
 test/tmp-*/
 logs/
