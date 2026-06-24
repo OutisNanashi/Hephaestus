@@ -4,6 +4,31 @@ import { fail } from "./errors.js";
 import { resolveConfigPath } from "./safe-path.js";
 
 const REQUIRED_CONFIG_KEYS = ["allowedRoot", "registryPath", "logDirectory"];
+const OPTIONAL_CONFIG_KEYS = new Set(["notifications"]);
+const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/u;
+
+function notificationConfig(raw) {
+  if (raw === undefined) return undefined;
+  if (!raw || Array.isArray(raw) || typeof raw !== "object" || Object.keys(raw).some((key) => key !== "telegram")) {
+    fail("Configuration notifications must contain only an optional telegram object.", "INVALID_CONFIG");
+  }
+  if (raw.telegram === undefined) return Object.freeze({});
+  const telegram = raw.telegram;
+  const keys = ["enabled", "botTokenEnv", "chatIdEnv"];
+  if (!telegram || Array.isArray(telegram) || typeof telegram !== "object" || Object.keys(telegram).some((key) => !keys.includes(key))) {
+    fail("Configuration telegram notification settings are invalid.", "INVALID_CONFIG");
+  }
+  if (typeof telegram.enabled !== "boolean") fail("Configuration telegram enabled must be a boolean.", "INVALID_CONFIG");
+  for (const key of ["botTokenEnv", "chatIdEnv"]) {
+    if (telegram[key] !== undefined && (typeof telegram[key] !== "string" || !ENVIRONMENT_NAME.test(telegram[key]))) {
+      fail(`Configuration telegram ${key} must be an environment variable name.`, "INVALID_CONFIG");
+    }
+  }
+  if (telegram.enabled && (telegram.botTokenEnv === undefined || telegram.chatIdEnv === undefined)) {
+    fail("Enabled Telegram notifications require botTokenEnv and chatIdEnv references.", "INVALID_CONFIG");
+  }
+  return Object.freeze({ telegram: Object.freeze({ ...telegram }) });
+}
 
 function readJson(filePath, label) {
   let source;
@@ -30,7 +55,7 @@ export function loadConfig(configPath = path.resolve("hephaestus.config.json")) 
       fail(`Configuration is missing required key: ${key}.`, "INVALID_CONFIG");
     }
   }
-  const allowedKeys = new Set(REQUIRED_CONFIG_KEYS);
+  const allowedKeys = new Set([...REQUIRED_CONFIG_KEYS, ...OPTIONAL_CONFIG_KEYS]);
   for (const key of Object.keys(raw)) {
     if (!allowedKeys.has(key)) {
       fail(`Configuration contains unsupported key: ${key}.`, "INVALID_CONFIG");
@@ -57,6 +82,7 @@ export function loadConfig(configPath = path.resolve("hephaestus.config.json")) 
     configPath: absoluteConfigPath,
     allowedRoot: fs.realpathSync(allowedRoot),
     registryPath: resolveConfigPath(configDirectory, raw.registryPath, "registryPath"),
-    logDirectory: resolveConfigPath(configDirectory, raw.logDirectory, "logDirectory")
+    logDirectory: resolveConfigPath(configDirectory, raw.logDirectory, "logDirectory"),
+    ...(raw.notifications === undefined ? {} : { notifications: notificationConfig(raw.notifications) })
   });
 }
