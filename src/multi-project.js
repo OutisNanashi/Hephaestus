@@ -136,7 +136,8 @@ export function transitionProjectStatus(state, action) {
   return Object.freeze(validateState(next));
 }
 
-function readProjectState(project) {
+/** Read one declared project's validated state without creating or changing files. */
+export function readProjectState(project) {
   const root = assertRealPathWithinRoot(project.path, project.path);
   const statePath = projectResource(project, "state");
   try {
