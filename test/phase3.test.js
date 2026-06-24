@@ -93,6 +93,31 @@ test("allowlisted command runs and captures stdout", () => {
   }
 });
 
+test("allowlisted npm test runs inside the mounted project and captures output", () => {
+  const context = makeContext();
+  try {
+    fs.writeFileSync(path.join(context.projectPath, "package.json"), JSON.stringify({ scripts: { test: "node -e \"console.log('sandbox-npm-ok')\"" } }));
+    const report = runSandboxCommand({ allowedRoot: context.allowedRoot, projectPath: context.projectPath, commandId: "test-npm" });
+    assert.equal(report.status, "passed");
+    assert.match(report.stdout, /sandbox-npm-ok/u);
+    assert.equal(report.sandbox.workspace, "/workspace");
+  } finally {
+    fs.rmSync(context.directory, { recursive: true, force: true });
+  }
+});
+
+test("allowlisted identity probe proves the container workspace", () => {
+  const context = makeContext();
+  try {
+    const report = runSandboxCommand({ allowedRoot: context.allowedRoot, projectPath: context.projectPath, commandId: "test-identity" });
+    assert.equal(report.status, "passed");
+    assert.match(report.stdout, /^workspace=\/workspace$/mu);
+    assert.match(report.stdout, /^hostname=.+$/mu);
+  } finally {
+    fs.rmSync(context.directory, { recursive: true, force: true });
+  }
+});
+
 test("forbidden command is rejected before sandbox startup", () => {
   const context = makeContext();
   try {

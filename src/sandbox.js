@@ -6,18 +6,21 @@ import { fail } from "./errors.js";
 import { inspectProject } from "./inspection.js";
 import { assertRealPathWithinRoot } from "./safe-path.js";
 
-export const SANDBOX_IMAGE = "postgres:16-alpine";
+export const SANDBOX_IMAGE = "node:20-alpine";
 const SANDBOX_WORKSPACE = "/workspace";
 const SAFE_CONTAINER_ENVIRONMENT = Object.freeze({ LANG: "C.UTF-8" });
 const COMMAND_TIMEOUT_MS = 1_000;
 const DOCKER_LIFECYCLE_TIMEOUT_MS = 5_000;
+const NPM_TEST_TIMEOUT_MS = 15_000;
 
 const ALLOWLIST = Object.freeze({
   "test-echo": Object.freeze({ script: "printf 'sandbox-ok\\n'" }),
   "test-stderr": Object.freeze({ script: "printf 'sandbox-out\\n'; printf 'sandbox-err\\n' >&2; exit 7" }),
   "test-timeout": Object.freeze({ script: "sleep 5" }),
   "test-workspace": Object.freeze({ script: "test -d /workspace && test -f /workspace/PLAN.md" }),
-  "test-host-inaccessible": Object.freeze({ script: "test ! -e /host && test ! -e /mnt/c" })
+  "test-host-inaccessible": Object.freeze({ script: "test ! -e /host && test ! -e /mnt/c" }),
+  "test-identity": Object.freeze({ script: "printf 'workspace=%s\\n' \"$PWD\"; printf 'hostname=%s\\n' \"$(hostname)\"" }),
+  "test-npm": Object.freeze({ script: "npm test" })
   , "fixture-agent": Object.freeze({ script: "test -f /workspace/out/prompts/next-task.md && printf 'fixture-agent received prompt:\\n'; cat /workspace/out/prompts/next-task.md; printf '\\nfixture-agent completed\\n'" })
   , "fixture-agent-empty": Object.freeze({ script: ":" })
   , "fixture-agent-crash": Object.freeze({ script: "printf 'fixture-agent crashed\\n' >&2; exit 23" })
@@ -141,7 +144,7 @@ export function runSandboxCommand({ allowedRoot, projectPath, commandId }) {
   let result;
   let cleanup;
   try {
-    const timeout = commandId === "test-timeout" ? COMMAND_TIMEOUT_MS : DOCKER_LIFECYCLE_TIMEOUT_MS;
+    const timeout = commandId === "test-timeout" ? COMMAND_TIMEOUT_MS : commandId === "test-npm" ? NPM_TEST_TIMEOUT_MS : DOCKER_LIFECYCLE_TIMEOUT_MS;
     result = dockerResult(sandboxArgs(projectState.projectPath, name, ALLOWLIST[commandId].script), timeout);
   } finally {
     cleanup = cleanupSandbox(name);
