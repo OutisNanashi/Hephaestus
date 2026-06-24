@@ -66,10 +66,12 @@ test("multi-project registry normalizes independent projects and resources deter
   } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
 
-test("registry rejects duplicate roots, duplicate containers, and traversal", () => {
+test("registry rejects duplicate or nested roots, duplicate containers, and traversal", () => {
   const c = context();
   try {
     writeJson(c.registry, { projects: [entry("alpha"), entry("beta", { path: "alpha" })] });
+    assert.throws(() => loadMultiProjectRegistry(c.registry, c.root), (error) => code(error, "INVALID_MULTI_PROJECT_REGISTRY"));
+    writeJson(c.registry, { projects: [entry("alpha"), entry("beta", { path: "alpha/child" })] });
     assert.throws(() => loadMultiProjectRegistry(c.registry, c.root), (error) => code(error, "INVALID_MULTI_PROJECT_REGISTRY"));
     writeJson(c.registry, { projects: [entry("alpha"), entry("beta", { container: { id: "hephaestus-alpha", workspace: "/workspace" } })] });
     assert.throws(() => loadMultiProjectRegistry(c.registry, c.root), (error) => code(error, "INVALID_MULTI_PROJECT_REGISTRY"));

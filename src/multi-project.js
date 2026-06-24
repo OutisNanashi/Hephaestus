@@ -80,14 +80,18 @@ function normalizeProject(raw, allowedRoot, index) {
 
 function assertUniqueProjects(projects) {
   const ids = new Set();
-  const roots = new Set();
+  const roots = [];
   const containers = new Set();
   const resources = new Set();
   for (const project of projects) {
     if (ids.has(project.id)) fail(`Multi-project registry contains duplicate id: ${project.id}.`, "INVALID_MULTI_PROJECT_REGISTRY");
-    if (roots.has(project.path)) fail("Multi-project registry contains duplicate project roots; shared roots are not supported.", "INVALID_MULTI_PROJECT_REGISTRY");
+    for (const root of roots) {
+      const relative = path.relative(root, project.path);
+      const nested = relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+      if (nested) fail("Multi-project registry contains overlapping project roots; nested roots are not supported.", "INVALID_MULTI_PROJECT_REGISTRY");
+    }
     if (containers.has(project.container.id)) fail(`Multi-project registry contains duplicate container id: ${project.container.id}.`, "INVALID_MULTI_PROJECT_REGISTRY");
-    ids.add(project.id); roots.add(project.path); containers.add(project.container.id);
+    ids.add(project.id); roots.push(project.path); containers.add(project.container.id);
     for (const resourcePath of Object.values(project.paths)) {
       if (resources.has(resourcePath)) fail("Multi-project registry contains shared output paths.", "INVALID_MULTI_PROJECT_REGISTRY");
       resources.add(resourcePath);
