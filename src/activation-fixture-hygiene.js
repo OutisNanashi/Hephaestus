@@ -13,7 +13,8 @@ const ALLOWED_REQUEST_KEYS = new Set([
 
 const CLEANUP_FILE_TARGETS = Object.freeze([
   Object.freeze({ kind: "exact", relative: "AGENT_OUTPUT.md" }),
-  Object.freeze({ kind: "exact", relative: "out/prompts/step-6i-readonly-prompt.md" })
+  Object.freeze({ kind: "exact", relative: "out/prompts/step-6i-readonly-prompt.md" }),
+  Object.freeze({ kind: "exact", relative: "out/summaries/step-6k-readonly-codex-closeout.json" })
 ]);
 
 const CLEANUP_DIR_PATTERNS = Object.freeze([
@@ -21,7 +22,7 @@ const CLEANUP_DIR_PATTERNS = Object.freeze([
   Object.freeze({ directory: "out/agent_outputs", pattern: /^step-6i-readonly-prompt-record-[A-Za-z0-9_.\-]+\.json$/u })
 ]);
 
-const CLEANUP_EMPTY_DIRECTORIES = Object.freeze(["out/prompts", "out/agent_outputs", "out"]);
+const CLEANUP_EMPTY_DIRECTORIES = Object.freeze(["out/prompts", "out/agent_outputs", "out/summaries", "out"]);
 
 const PROTECTED_PROJECT_FILES = Object.freeze([
   "PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "STATE.json", "CURRENT_TASK.md",

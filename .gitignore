@@ -12,3 +12,4 @@ node-v*-SHASUMS256.txt
 fixtures/projects/*/AGENT_OUTPUT.md
 fixtures/projects/*/out/agent_outputs/
 fixtures/projects/*/out/prompts/
+fixtures/projects/*/out/summaries/

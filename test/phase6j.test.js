@@ -246,12 +246,16 @@ test("cleanup never deletes outside the resolved project root, even if symlinks 
 });
 
 test("cleanup whitelist is the documented public contract (exact files, patterned directories, empty directories)", () => {
-  assert.deepEqual([...CLEANUP_WHITELIST.exactFiles], ["AGENT_OUTPUT.md", "out/prompts/step-6i-readonly-prompt.md"]);
+  assert.deepEqual([...CLEANUP_WHITELIST.exactFiles], [
+    "AGENT_OUTPUT.md",
+    "out/prompts/step-6i-readonly-prompt.md",
+    "out/summaries/step-6k-readonly-codex-closeout.json"
+  ]);
   assert.equal(CLEANUP_WHITELIST.patternedDirectories.length, 2);
   const patterns = CLEANUP_WHITELIST.patternedDirectories.map((entry) => `${entry.directory}|${entry.pattern}`);
   assert.ok(patterns.some((entry) => entry.startsWith("out/agent_outputs|") && entry.includes("step-6h-readonly-inspect")));
   assert.ok(patterns.some((entry) => entry.startsWith("out/agent_outputs|") && entry.includes("step-6i-readonly-prompt-record")));
-  assert.deepEqual([...CLEANUP_WHITELIST.emptyDirectories], ["out/prompts", "out/agent_outputs", "out"]);
+  assert.deepEqual([...CLEANUP_WHITELIST.emptyDirectories], ["out/prompts", "out/agent_outputs", "out/summaries", "out"]);
 });
 
 test("ensureCleanFixture helper produces the same Step 6J result and clears artifacts", () => {
