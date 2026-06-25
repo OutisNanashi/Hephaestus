@@ -21,9 +21,9 @@ export const READONLY_SMOKE_PROMPT = [
 ].join("\n");
 
 export const READONLY_SMOKE_ARGV = Object.freeze([
-  "exec",
   "--sandbox", "read-only",
   "--ask-for-approval", "never",
+  "exec",
   READONLY_SMOKE_PROMPT
 ]);
 
@@ -31,6 +31,8 @@ export const READONLY_SMOKE_FLAGS = Object.freeze({
   sandbox: "read-only",
   askForApproval: "never",
   subcommand: "exec",
+  sandboxScope: "top-level",
+  askForApprovalScope: "top-level",
   shell: false
 });
 
@@ -153,14 +155,27 @@ function assertRequestShape(request) {
 
 function assertArgvSafety() {
   const flat = READONLY_SMOKE_ARGV.map((entry) => String(entry));
-  if (flat[0] !== "exec") fail("Readonly smoke argv must start with the exec subcommand.", "INVALID_READONLY_SMOKE_ARGV");
+  const execIndex = flat.indexOf("exec");
+  if (execIndex === -1) fail("Readonly smoke argv must include the exec subcommand.", "INVALID_READONLY_SMOKE_ARGV");
   const sandboxIndex = flat.indexOf("--sandbox");
   if (sandboxIndex === -1 || flat[sandboxIndex + 1] !== "read-only") {
     fail("Readonly smoke argv must include `--sandbox read-only`.", "INVALID_READONLY_SMOKE_ARGV");
   }
+  if (sandboxIndex > execIndex) {
+    fail("Readonly smoke argv must place --sandbox before the exec subcommand (top-level option).", "INVALID_READONLY_SMOKE_ARGV");
+  }
   const approvalIndex = flat.indexOf("--ask-for-approval");
   if (approvalIndex === -1 || flat[approvalIndex + 1] !== "never") {
     fail("Readonly smoke argv must include `--ask-for-approval never`.", "INVALID_READONLY_SMOKE_ARGV");
+  }
+  if (approvalIndex > execIndex) {
+    fail("Readonly smoke argv must place --ask-for-approval before the exec subcommand (top-level option).", "INVALID_READONLY_SMOKE_ARGV");
+  }
+  if (execIndex !== flat.length - 2) {
+    fail("Readonly smoke argv must end with exec followed by the hardcoded prompt.", "INVALID_READONLY_SMOKE_ARGV");
+  }
+  if (flat[flat.length - 1] !== READONLY_SMOKE_PROMPT) {
+    fail("Readonly smoke argv must terminate with the hardcoded prompt.", "INVALID_READONLY_SMOKE_ARGV");
   }
   for (const forbidden of FORBIDDEN_ARGV_TOKENS) {
     if (flat.includes(forbidden)) {
@@ -262,7 +277,8 @@ export function runCodexReadonlySmoke(request) {
       killSignal: "SIGTERM",
       shell: false,
       env: safeEnvironment,
-      cwd: projectPath
+      cwd: projectPath,
+      input: ""
     });
   } catch (error) {
     spawnError = error;
@@ -292,10 +308,13 @@ export function runCodexReadonlySmoke(request) {
     invocation: Object.freeze({
       shell: false,
       sandbox: READONLY_SMOKE_FLAGS.sandbox,
+      sandboxScope: READONLY_SMOKE_FLAGS.sandboxScope,
       askForApproval: READONLY_SMOKE_FLAGS.askForApproval,
+      askForApprovalScope: READONLY_SMOKE_FLAGS.askForApprovalScope,
       subcommand: READONLY_SMOKE_FLAGS.subcommand,
       autoApproval: false,
       dangerousBypass: false,
+      stdinPolicy: "closed-empty",
       envPolicy: "sandbox-safe (LANG, PATH)"
     }),
     smokeMarker: READONLY_SMOKE_MARKER,

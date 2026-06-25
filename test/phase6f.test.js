@@ -79,17 +79,38 @@ function snapshot(projectPath) {
   return out;
 }
 
-test("readonly smoke argv is hardcoded, uses exec, --sandbox read-only, --ask-for-approval never, and the marker prompt", () => {
+test("readonly smoke argv places --sandbox read-only and --ask-for-approval never BEFORE exec (top-level options) and ends with the hardcoded prompt", () => {
   const argv = [...READONLY_SMOKE_ARGV];
-  assert.equal(argv[0], "exec");
-  assert.deepEqual(argv.slice(1, 3), ["--sandbox", "read-only"]);
-  assert.deepEqual(argv.slice(3, 5), ["--ask-for-approval", "never"]);
+  assert.deepEqual(argv.slice(0, 2), ["--sandbox", "read-only"]);
+  assert.deepEqual(argv.slice(2, 4), ["--ask-for-approval", "never"]);
+  assert.equal(argv[4], "exec");
   assert.equal(argv[5], READONLY_SMOKE_PROMPT);
   assert.equal(argv.length, 6);
+  const sandboxIndex = argv.indexOf("--sandbox");
+  const approvalIndex = argv.indexOf("--ask-for-approval");
+  const execIndex = argv.indexOf("exec");
+  assert.ok(sandboxIndex < execIndex, "--sandbox must come before exec");
+  assert.ok(approvalIndex < execIndex, "--ask-for-approval must come before exec");
+  assert.equal(execIndex, argv.length - 2, "exec must be the penultimate token followed only by the prompt");
   assert.equal(READONLY_SMOKE_FLAGS.subcommand, "exec");
   assert.equal(READONLY_SMOKE_FLAGS.sandbox, "read-only");
+  assert.equal(READONLY_SMOKE_FLAGS.sandboxScope, "top-level");
   assert.equal(READONLY_SMOKE_FLAGS.askForApproval, "never");
+  assert.equal(READONLY_SMOKE_FLAGS.askForApprovalScope, "top-level");
   assert.equal(READONLY_SMOKE_FLAGS.shell, false);
+});
+
+test("regression: readonly smoke argv does NOT use the old invalid `exec --sandbox … --ask-for-approval …` shape", () => {
+  const argv = [...READONLY_SMOKE_ARGV];
+  assert.notEqual(argv[0], "exec", "exec must not be the first token (it would consume top-level flags as exec args)");
+  const execIndex = argv.indexOf("exec");
+  const sandboxIndex = argv.indexOf("--sandbox");
+  const approvalIndex = argv.indexOf("--ask-for-approval");
+  assert.notEqual(execIndex, -1);
+  assert.notEqual(sandboxIndex, -1);
+  assert.notEqual(approvalIndex, -1);
+  assert.equal(sandboxIndex > execIndex, false, "--sandbox must NOT appear after exec (was the source of the Codex parser error)");
+  assert.equal(approvalIndex > execIndex, false, "--ask-for-approval must NOT appear after exec (was the source of the Codex parser error)");
 });
 
 test("readonly smoke argv contains no dangerous bypass / workspace-write / danger-full-access flags", () => {
@@ -114,11 +135,20 @@ test("readonly smoke prompt forbids edits, commands, network access, and demands
   assert.ok(READONLY_SMOKE_PROMPT.includes(READONLY_SMOKE_MARKER));
 });
 
-test("readonly smoke uses shell:false, hardcoded executable, hardcoded argv, and reduced env", () => {
+test("readonly smoke uses shell:false, hardcoded executable, hardcoded argv, closed stdin, and reduced env", () => {
   const context = makeContext();
   try {
-    const spawn = fakeSpawn(() => ({ status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" }));
-    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    let observedOptions;
+    const spawn = (executable, args, options) => {
+      observedOptions = options;
+      return { status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" };
+    };
+    spawn.calls = [];
+    const wrapped = (executable, args, options) => {
+      spawn.calls.push({ executable, args: [...args], shell: options?.shell, env: { ...options?.env }, cwd: options?.cwd, input: options?.input });
+      return spawn(executable, args, options);
+    };
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn: wrapped }));
     assert.equal(report.classification, CLASSIFICATIONS.PASS);
     assert.equal(spawn.calls.length, 1);
     const call = spawn.calls[0];
@@ -127,6 +157,8 @@ test("readonly smoke uses shell:false, hardcoded executable, hardcoded argv, and
     assert.deepEqual(call.args, [...READONLY_SMOKE_ARGV]);
     assert.deepEqual(Object.keys(call.env).sort(), ["LANG", "PATH"]);
     assert.equal(call.env.LANG, "C.UTF-8");
+    assert.equal(call.input, "", "stdin must be explicitly closed/empty so codex does not block reading from stdin");
+    assert.equal(observedOptions.shell, false);
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
@@ -283,8 +315,12 @@ test("readonly smoke captures stdout, stderr, exit code, argv, executable, times
     assert.deepEqual([...report.argv], [...READONLY_SMOKE_ARGV]);
     assert.equal(report.invocation.shell, false);
     assert.equal(report.invocation.sandbox, "read-only");
+    assert.equal(report.invocation.sandboxScope, "top-level");
     assert.equal(report.invocation.askForApproval, "never");
+    assert.equal(report.invocation.askForApprovalScope, "top-level");
+    assert.equal(report.invocation.subcommand, "exec");
     assert.equal(report.invocation.dangerousBypass, false);
+    assert.equal(report.invocation.stdinPolicy, "closed-empty");
     assert.ok(typeof report.startedAt === "string" && report.startedAt.length > 0);
     assert.ok(typeof report.finishedAt === "string" && report.finishedAt.length > 0);
     assert.equal(report.timeoutMs, 12345);
