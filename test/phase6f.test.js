@@ -1,0 +1,411 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import {
+  CLASSIFICATIONS,
+  READONLY_SMOKE_ARGV,
+  READONLY_SMOKE_FLAGS,
+  READONLY_SMOKE_MARKER,
+  READONLY_SMOKE_PROMPT,
+  runCodexReadonlySmoke
+} from "../src/agent-readonly-exec.js";
+import { run as runCli } from "../src/cli.js";
+import { HephaestusError } from "../src/errors.js";
+
+const CLI_PATH = path.resolve("src/cli.js");
+
+const validState = Object.freeze({
+  currentPhase: "6F", currentTask: "codex-readonly-exec", currentBranch: "main", currentPr: null,
+  assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false,
+  lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started",
+  containerStatus: "not-started", lastGptDecision: null, nextAction: "agent-run"
+});
+
+function temporaryDirectory() { return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-")); }
+function writeJson(filePath, value) { fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`); }
+function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
+
+function makeContext() {
+  const directory = temporaryDirectory();
+  const allowedRoot = path.join(directory, "projects");
+  const projectPath = path.join(allowedRoot, "demo-project");
+  fs.mkdirSync(path.join(projectPath, "src"), { recursive: true });
+  fs.mkdirSync(path.join(projectPath, "test"), { recursive: true });
+  for (const [name, content] of Object.entries({
+    "PLAN.md": "# Agent project\n",
+    "BUILDING_REFERENCE.md": "# Reference\n",
+    "BUILD_LOG.md": "# Build log\n",
+    "CURRENT_TASK.md": "# Task\n",
+    "package.json": `${JSON.stringify({ name: "demo-project", version: "0.0.0" }, null, 2)}\n`,
+    "src/index.js": "export const greeting = 'hi';\n",
+    "test/index.test.js": "import test from 'node:test'; test('noop', () => {});\n"
+  })) fs.writeFileSync(path.join(projectPath, name), content);
+  writeJson(path.join(projectPath, "STATE.json"), validState);
+  return { directory, allowedRoot, projectPath };
+}
+
+function fakeSpawn(behavior) {
+  const calls = [];
+  const fn = (executable, args, options) => {
+    calls.push(Object.freeze({
+      executable, args: [...args], shell: options?.shell,
+      env: { ...options?.env }, cwd: options?.cwd, timeout: options?.timeout
+    }));
+    return behavior(executable, args, options, calls);
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+function baseRequest(context, overrides = {}) {
+  return {
+    adapterId: "codex",
+    allowedRoot: context.allowedRoot,
+    projectPath: context.projectPath,
+    explicitReadonlySmokePermit: true,
+    env: { PATH: "/usr/bin" },
+    ...overrides
+  };
+}
+
+function snapshot(projectPath) {
+  const out = {};
+  for (const name of ["PLAN.md", "BUILD_LOG.md", "CURRENT_TASK.md", "STATE.json", "package.json", "src/index.js", "test/index.test.js"]) {
+    const file = path.join(projectPath, name);
+    out[name] = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+  }
+  return out;
+}
+
+test("readonly smoke argv is hardcoded, uses exec, --sandbox read-only, --ask-for-approval never, and the marker prompt", () => {
+  const argv = [...READONLY_SMOKE_ARGV];
+  assert.equal(argv[0], "exec");
+  assert.deepEqual(argv.slice(1, 3), ["--sandbox", "read-only"]);
+  assert.deepEqual(argv.slice(3, 5), ["--ask-for-approval", "never"]);
+  assert.equal(argv[5], READONLY_SMOKE_PROMPT);
+  assert.equal(argv.length, 6);
+  assert.equal(READONLY_SMOKE_FLAGS.subcommand, "exec");
+  assert.equal(READONLY_SMOKE_FLAGS.sandbox, "read-only");
+  assert.equal(READONLY_SMOKE_FLAGS.askForApproval, "never");
+  assert.equal(READONLY_SMOKE_FLAGS.shell, false);
+});
+
+test("readonly smoke argv contains no dangerous bypass / workspace-write / danger-full-access flags", () => {
+  const forbidden = [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--add-dir",
+    "--search",
+    "-c",
+    "workspace-write",
+    "danger-full-access"
+  ];
+  const flat = [...READONLY_SMOKE_ARGV];
+  for (const token of forbidden) assert.equal(flat.includes(token), false, `argv must not contain ${token}`);
+});
+
+test("readonly smoke prompt forbids edits, commands, network access, and demands exact marker line", () => {
+  assert.match(READONLY_SMOKE_PROMPT, /Do not modify any files/u);
+  assert.match(READONLY_SMOKE_PROMPT, /Do not run any shell commands/u);
+  assert.match(READONLY_SMOKE_PROMPT, /Do not access the network/u);
+  assert.match(READONLY_SMOKE_PROMPT, /Do not request approvals/u);
+  assert.ok(READONLY_SMOKE_PROMPT.includes(READONLY_SMOKE_MARKER));
+});
+
+test("readonly smoke uses shell:false, hardcoded executable, hardcoded argv, and reduced env", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.PASS);
+    assert.equal(spawn.calls.length, 1);
+    const call = spawn.calls[0];
+    assert.equal(call.executable, "codex");
+    assert.equal(call.shell, false);
+    assert.deepEqual(call.args, [...READONLY_SMOKE_ARGV]);
+    assert.deepEqual(Object.keys(call.env).sort(), ["LANG", "PATH"]);
+    assert.equal(call.env.LANG, "C.UTF-8");
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke rejects user-supplied executable, argv, shell, command, or prompt fields", () => {
+  const context = makeContext();
+  try {
+    for (const evilKey of ["executable", "argv", "shell", "shellCommand", "command", "prompt", "autoApproval", "cwd"]) {
+      assert.throws(
+        () => runCodexReadonlySmoke({ ...baseRequest(context), [evilKey]: "/bin/sh -c rm" }),
+        (error) => code(error, "INVALID_READONLY_SMOKE_REQUEST")
+      );
+    }
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke rejects non-codex adapters", () => {
+  const context = makeContext();
+  try {
+    for (const adapterId of ["claude-code", "opencode", "fixture-agent", "made-up-agent"]) {
+      assert.throws(
+        () => runCodexReadonlySmoke(baseRequest(context, { adapterId })),
+        (error) => code(error, "READONLY_SMOKE_ADAPTER_NOT_ALLOWED")
+      );
+    }
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke requires explicitReadonlySmokePermit=true", () => {
+  const context = makeContext();
+  try {
+    assert.throws(
+      () => runCodexReadonlySmoke(baseRequest(context, { explicitReadonlySmokePermit: false })),
+      (error) => code(error, "READONLY_SMOKE_PERMIT_REQUIRED")
+    );
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke missing codex on PATH classifies as STEP_6F_BLOCKED_CODEX_NOT_INSTALLED", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: null, stdout: "", stderr: "", error: Object.assign(new Error("not found"), { code: "ENOENT" }) }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.NOT_INSTALLED);
+    assert.equal(report.markerCaptured, false);
+    assert.equal(report.step6gSafeToDesign, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke non-zero exit classifies as STEP_6F_BLOCKED_CODEX_EXIT_NONZERO", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 9, stdout: "", stderr: "codex error\n" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.EXIT_NONZERO);
+    assert.equal(report.exitCode, 9);
+    assert.equal(report.markerCaptured, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke timeout classifies as STEP_6F_BLOCKED_CODEX_TIMEOUT", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({
+      status: null, signal: "SIGTERM", stdout: "", stderr: "",
+      error: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })
+    }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.TIMEOUT);
+    assert.equal(report.timedOut, true);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke zero-exit but missing marker classifies as STEP_6F_BLOCKED_MARKER_MISSING", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 0, stdout: "hello world\n", stderr: "" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.MARKER_MISSING);
+    assert.equal(report.exitCode, 0);
+    assert.equal(report.markerCaptured, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke unauthenticated text classifies as STEP_6F_BLOCKED_CODEX_NOT_AUTHENTICATED", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 1, stdout: "", stderr: "Not authenticated. Please sign in by running `codex login`.\n" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.NOT_AUTHENTICATED);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke interactive/approval text classifies as STEP_6F_BLOCKED_INTERACTIVE", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 0, stdout: "Waiting for approval...\n", stderr: "" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.INTERACTIVE);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke detects mutations to protected files even when codex exits 0 and emits the marker", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn((exe, args, options) => {
+      fs.writeFileSync(path.join(options.cwd, "PLAN.md"), "# Mutated\n");
+      return { status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" };
+    });
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.MUTATION_DETECTED);
+    assert.equal(report.projectMutated, true);
+    assert.ok(report.mutatedFiles.includes("PLAN.md"));
+    assert.equal(report.markerCaptured, false);
+    assert.equal(report.step6gSafeToDesign, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke detects unexpected new files under tracked dirs", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn((exe, args, options) => {
+      fs.writeFileSync(path.join(options.cwd, "src", "evil.js"), "// evil\n");
+      return { status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" };
+    });
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.MUTATION_DETECTED);
+    assert.equal(report.projectMutated, true);
+    assert.ok(report.mutatedFiles.includes("src/evil.js"));
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke passes only when exit 0 AND marker present AND no mutation", () => {
+  const context = makeContext();
+  try {
+    const before = snapshot(context.projectPath);
+    const spawn = fakeSpawn(() => ({ status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.PASS);
+    assert.equal(report.exitCode, 0);
+    assert.equal(report.markerCaptured, true);
+    assert.equal(report.projectMutated, false);
+    assert.equal(report.step6gSafeToDesign, true);
+    assert.equal(report.manualAction, null);
+    assert.deepEqual(snapshot(context.projectPath), before);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke captures stdout, stderr, exit code, argv, executable, timestamps, timeout, and error code", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 0, stdout: `${READONLY_SMOKE_MARKER} ok\n`, stderr: "warn\n" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn, timeoutMs: 12345 }));
+    assert.equal(report.executable, "codex");
+    assert.deepEqual([...report.argv], [...READONLY_SMOKE_ARGV]);
+    assert.equal(report.invocation.shell, false);
+    assert.equal(report.invocation.sandbox, "read-only");
+    assert.equal(report.invocation.askForApproval, "never");
+    assert.equal(report.invocation.dangerousBypass, false);
+    assert.ok(typeof report.startedAt === "string" && report.startedAt.length > 0);
+    assert.ok(typeof report.finishedAt === "string" && report.finishedAt.length > 0);
+    assert.equal(report.timeoutMs, 12345);
+    assert.equal(typeof report.exitCode, "number");
+    assert.ok(report.stdout.includes(READONLY_SMOKE_MARKER));
+    assert.equal(report.stderr.trim(), "warn");
+    assert.equal(report.errorCode, null);
+    assert.equal(report.timedOut, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke redacts api-key / token / github-shaped secrets and never includes them in the JSON report", () => {
+  const context = makeContext();
+  try {
+    const secret = "sk-abcdefghijklmnop1234567890ZZZZ";
+    const ghSecret = "ghp_ABCDEFGHIJ1234567890zzzz";
+    const spawn = fakeSpawn(() => ({
+      status: 0,
+      stdout: `${READONLY_SMOKE_MARKER}\ntoken=${secret}\n`,
+      stderr: `auth=${ghSecret}\n`
+    }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    const serialized = JSON.stringify(report);
+    assert.equal(serialized.includes(secret), false);
+    assert.equal(serialized.includes(ghSecret), false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke rejects project paths outside the allowed root before spawning", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => { throw new Error("must not spawn"); });
+    assert.throws(
+      () => runCodexReadonlySmoke(baseRequest(context, { spawn, projectPath: context.directory })),
+      (error) => code(error, "OUTSIDE_ALLOWED_ROOT")
+    );
+    assert.equal(spawn.calls.length, 0);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke applies a bounded timeout to the spawn options", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 0, stdout: `${READONLY_SMOKE_MARKER}\n`, stderr: "" }));
+    runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(typeof spawn.calls[0].timeout, "number");
+    assert.ok(spawn.calls[0].timeout > 0 && spawn.calls[0].timeout <= 5 * 60_000);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("CLI agent-codex-readonly-smoke returns nonzero exit when codex is unavailable on PATH", () => {
+  const context = makeContext();
+  try {
+    const configPath = path.join(context.directory, "config.json");
+    const registryPath = path.join(context.directory, "projects.json");
+    writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
+    writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    let stdout = "";
+    const originalWrite = process.stdout.write;
+    let exitCode;
+    try {
+      process.stdout.write = (chunk) => { stdout += chunk; return true; };
+      exitCode = runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]);
+    } finally { process.stdout.write = originalWrite; }
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.adapterId, "codex");
+    assert.equal(parsed.mode, "readonly-exec-smoke");
+    assert.equal(parsed.invocation.shell, false);
+    assert.equal(parsed.invocation.sandbox, "read-only");
+    assert.equal(parsed.invocation.askForApproval, "never");
+    assert.equal(parsed.invocation.dangerousBypass, false);
+    assert.equal(parsed.executable, "codex");
+    assert.deepEqual(parsed.argv, [...READONLY_SMOKE_ARGV]);
+    assert.notEqual(exitCode, 0);
+    assert.notEqual(parsed.classification, CLASSIFICATIONS.PASS);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("CLI agent-codex-readonly-smoke rejects non-codex adapter selections", () => {
+  const context = makeContext();
+  try {
+    const configPath = path.join(context.directory, "config.json");
+    const registryPath = path.join(context.directory, "projects.json");
+    writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
+    writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    let stdout = "";
+    const originalWrite = process.stdout.write;
+    try {
+      process.stdout.write = (chunk) => { stdout += chunk; return true; };
+      assert.throws(
+        () => runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project", "--adapter", "claude-code"]),
+        (error) => code(error, "INVALID_ARGUMENT")
+      );
+    } finally { process.stdout.write = originalWrite; }
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("spawned CLI agent-codex-readonly-smoke process exits non-zero when codex is missing", () => {
+  const context = makeContext();
+  try {
+    const configPath = path.join(context.directory, "config.json");
+    const registryPath = path.join(context.directory, "projects.json");
+    writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
+    writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
+    const env = { ...process.env, PATH: emptyPathDir, Path: emptyPathDir, path: emptyPathDir };
+    const result = spawnSync(process.execPath, [CLI_PATH, "agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"], {
+      encoding: "utf8",
+      shell: false,
+      env,
+      timeout: 60_000
+    });
+    assert.equal(result.error, undefined, `spawn failed: ${result.error?.message ?? ""}`);
+    assert.equal(typeof result.status, "number");
+    assert.notEqual(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.classification, CLASSIFICATIONS.NOT_INSTALLED);
+    assert.equal(parsed.invocation.sandbox, "read-only");
+    assert.equal(parsed.invocation.askForApproval, "never");
+    assert.equal(parsed.invocation.shell, false);
+    assert.equal(parsed.invocation.dangerousBypass, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
