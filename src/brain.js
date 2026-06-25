@@ -20,37 +20,46 @@ export function createBrainRequest(projectState) {
   });
 }
 
-function validateStringArray(value, name) {
+function validateStringArray(value, name, label, code) {
   if (!Array.isArray(value) || value.length === 0 || value.some((entry) => typeof entry !== "string" || entry.trim() === "")) {
-    fail(`Mock GPT decision ${name} must be a non-empty array of strings.`, "INVALID_MOCK_DECISION");
+    fail(`${label} ${name} must be a non-empty array of strings.`, code);
   }
   return Object.freeze([...value]);
 }
 
-/** Validate all decision content before it can influence any project write. */
-export function validateMockDecision(decision) {
+function validateDecision(decision, label, code) {
   if (decision === null || Array.isArray(decision) || typeof decision !== "object") {
-    fail("Mock GPT decision must be a JSON object.", "INVALID_MOCK_DECISION");
+    fail(`${label} must be a JSON object.`, code);
   }
   const required = ["nextAction", "rationale", "allowedFiles", "requiredTests", "stopConditions"];
   for (const key of required) {
-    if (!(key in decision)) fail(`Mock GPT decision is missing required key: ${key}.`, "INVALID_MOCK_DECISION");
+    if (!(key in decision)) fail(`${label} is missing required key: ${key}.`, code);
   }
   if (Object.keys(decision).some((key) => !required.includes(key))) {
-    fail("Mock GPT decision contains unsupported keys.", "INVALID_MOCK_DECISION");
+    fail(`${label} contains unsupported keys.`, code);
   }
   for (const key of ["nextAction", "rationale"]) {
     if (typeof decision[key] !== "string" || decision[key].trim() === "") {
-      fail(`Mock GPT decision ${key} must be a non-empty string.`, "INVALID_MOCK_DECISION");
+      fail(`${label} ${key} must be a non-empty string.`, code);
     }
   }
   return Object.freeze({
     nextAction: decision.nextAction,
     rationale: decision.rationale,
-    allowedFiles: validateStringArray(decision.allowedFiles, "allowedFiles"),
-    requiredTests: validateStringArray(decision.requiredTests, "requiredTests"),
-    stopConditions: validateStringArray(decision.stopConditions, "stopConditions")
+    allowedFiles: validateStringArray(decision.allowedFiles, "allowedFiles", label, code),
+    requiredTests: validateStringArray(decision.requiredTests, "requiredTests", label, code),
+    stopConditions: validateStringArray(decision.stopConditions, "stopConditions", label, code)
   });
+}
+
+/** Validate all fixture decision content before it can influence any project write. */
+export function validateMockDecision(decision) {
+  return validateDecision(decision, "Mock GPT decision", "INVALID_MOCK_DECISION");
+}
+
+/** Validate real provider output before it can become a coding-agent prompt. */
+export function validateOpenAIDecision(decision) {
+  return validateDecision(decision, "OpenAI decision", "INVALID_OPENAI_DECISION");
 }
 
 function list(items) {

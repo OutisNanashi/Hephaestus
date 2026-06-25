@@ -4,7 +4,7 @@ import { fail } from "./errors.js";
 import { resolveConfigPath } from "./safe-path.js";
 
 const REQUIRED_CONFIG_KEYS = ["allowedRoot", "registryPath", "logDirectory"];
-const OPTIONAL_CONFIG_KEYS = new Set(["notifications"]);
+const OPTIONAL_CONFIG_KEYS = new Set(["notifications", "brain"]);
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/u;
 
 /** Load simple local KEY=value entries without replacing explicitly supplied environment values. */
@@ -49,6 +49,16 @@ function notificationConfig(raw) {
   return Object.freeze({ telegram: Object.freeze({ ...telegram }) });
 }
 
+function brainConfig(raw) {
+  if (!raw || Array.isArray(raw) || typeof raw !== "object" || Object.keys(raw).some((key) => !["provider", "apiKeyEnv", "model"].includes(key))) fail("Configuration brain settings are invalid.", "INVALID_CONFIG");
+  const provider = raw.provider === undefined ? "openai" : String(raw.provider).trim().toLowerCase();
+  if (!["openai", "gpt"].includes(provider)) fail("Configuration brain provider must be OpenAI/GPT.", "INVALID_CONFIG");
+  if (typeof raw.model !== "string" || raw.model.trim() === "") fail("Configuration brain model must be a non-empty string.", "INVALID_CONFIG");
+  if (raw.apiKeyEnv !== undefined && raw.apiKeyEnv !== "OPENAI_API_KEY") fail("Configuration brain apiKeyEnv must be OPENAI_API_KEY.", "INVALID_CONFIG");
+  if (raw.apiKeyEnv !== undefined && !ENVIRONMENT_NAME.test(raw.apiKeyEnv)) fail("Configuration brain apiKeyEnv must be an environment variable name.", "INVALID_CONFIG");
+  return Object.freeze({ provider: "openai", apiKeyEnv: "OPENAI_API_KEY", model: raw.model.trim() });
+}
+
 function readJson(filePath, label) {
   let source;
   try {
@@ -65,6 +75,7 @@ function readJson(filePath, label) {
 
 export function loadConfig(configPath = path.resolve("hephaestus.config.json")) {
   const absoluteConfigPath = path.resolve(configPath);
+  loadLocalEnvironment(path.resolve(".env"));
   loadLocalEnvironment(path.join(path.dirname(absoluteConfigPath), ".env"));
   const raw = readJson(absoluteConfigPath, "Configuration");
   if (raw === null || Array.isArray(raw) || typeof raw !== "object") {
@@ -103,6 +114,7 @@ export function loadConfig(configPath = path.resolve("hephaestus.config.json")) 
     allowedRoot: fs.realpathSync(allowedRoot),
     registryPath: resolveConfigPath(configDirectory, raw.registryPath, "registryPath"),
     logDirectory: resolveConfigPath(configDirectory, raw.logDirectory, "logDirectory"),
-    ...(raw.notifications === undefined ? {} : { notifications: notificationConfig(raw.notifications) })
+    ...(raw.notifications === undefined ? {} : { notifications: notificationConfig(raw.notifications) }),
+    ...(raw.brain === undefined ? {} : { brain: brainConfig(raw.brain) })
   });
 }

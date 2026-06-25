@@ -19,8 +19,9 @@ import { resolveSafePath } from "./safe-path.js";
 import { createNotificationEvent, redactNotificationEvent, renderNotification } from "./notification.js";
 import { globalProjectStatus, loadMultiProjectRegistry } from "./multi-project.js";
 import { loadDashboardStatus } from "./dashboard.js";
+import { runLiveBrainCycle } from "./live-brain.js";
 
-const HELP = `Hephaestus Phase 10\n\nUsage:\n  hephaestus --help\n  hephaestus status [--config <file>]\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n\nCommands:\n  status        List each registered project without mutating state or starting work.\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n\nSafety:\n  Project status is read-only. Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
+const HELP = `Hephaestus Phase 10\n\nUsage:\n  hephaestus --help\n  hephaestus status [--config <file>]\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus live-brain [--config <file>] [--project <id>] [--task <task>]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n\nCommands:\n  status        List each registered project without mutating state or starting work.\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  live-brain    Run one live configured brain call and save a bounded prompt; never runs an agent.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n\nSafety:\n  Project status is read-only. Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Live brain calls save prompts only and never run coding agents. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
 
 const DASHBOARD_HELP = HELP
   .replace("Hephaestus Phase 10", "Hephaestus Phase 11")
@@ -124,7 +125,7 @@ function notificationFixture(allowedRoot, fixturePath) {
   return parsed;
 }
 
-export function run(argv) {
+function runInternal(argv, handlers = {}) {
   const { command, reviewSubcommand, reviewProjectId, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath } = parseArguments(argv);
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(`${DASHBOARD_HELP}\n`);
@@ -133,7 +134,7 @@ export function run(argv) {
   const reviewIngest = command === "review" && reviewSubcommand === "ingest";
   const mergeCommand = command === "merge" && ["check", "relay"].includes(mergeSubcommand);
   const notifyRender = command === "notify" && notifySubcommand === "render";
-  if (!["status","dashboard","validate","inspect","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest && !mergeCommand && !notifyRender) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  if (!["status","dashboard","validate","inspect","live-brain","cycle","sandbox-run","agent-run","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest && !mergeCommand && !notifyRender) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   const config = loadConfig(path.resolve(configPath));
   if (command === "status") {
@@ -191,6 +192,11 @@ export function run(argv) {
     const reportPath = saveReport ? saveInspectionReport(projectState) : null;
     process.stdout.write(`${JSON.stringify(toInspectionSummary(projectState, reportPath), null, 2)}\n`);
     return 0;
+  }
+
+  if (command === "live-brain") {
+    if (typeof handlers.liveBrain !== "function") throw new HephaestusError("live-brain requires the async CLI runner.", "INVALID_ARGUMENT");
+    return handlers.liveBrain({ config, project, task });
   }
 
   if (command === "cycle") {
@@ -279,9 +285,38 @@ export function run(argv) {
   return 0;
 }
 
+export function run(argv) {
+  return runInternal(argv);
+}
+
+export async function runAsync(argv) {
+  return runInternal(argv, {
+    liveBrain: async ({ config, project, task }) => {
+      const promptOutputPath = path.join(path.dirname(config.configPath), "out", "prompts", "next-task.md");
+      const cycle = await runLiveBrainCycle({
+        allowedRoot: config.allowedRoot,
+        projectPath: project.path,
+        brain: config.brain,
+        task,
+        projectName: project.id,
+        promptOutputPath
+      });
+      process.stdout.write(`${JSON.stringify({
+        status: "completed",
+        provider: cycle.provider,
+        projectPath: cycle.projectPath,
+        promptPath: cycle.promptPath,
+        requestedTask: cycle.requestedTask,
+        nextAction: cycle.decision.nextAction
+      }, null, 2)}\n`);
+      return 0;
+    }
+  });
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    process.exitCode = run(process.argv.slice(2));
+    process.exitCode = await runAsync(process.argv.slice(2));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`Hephaestus error: ${message}\n`);
