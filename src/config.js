@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ADAPTER_IDS, getAdapter } from "./agent-adapters.js";
 import { fail } from "./errors.js";
 import { resolveConfigPath } from "./safe-path.js";
 
 const REQUIRED_CONFIG_KEYS = ["allowedRoot", "registryPath", "logDirectory"];
-const OPTIONAL_CONFIG_KEYS = new Set(["notifications", "brain"]);
+const OPTIONAL_CONFIG_KEYS = new Set(["notifications", "brain", "adapters"]);
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/u;
 
 /** Load simple local KEY=value entries without replacing explicitly supplied environment values. */
@@ -47,6 +48,29 @@ function notificationConfig(raw) {
     fail("Enabled Telegram notifications require botTokenEnv and chatIdEnv references.", "INVALID_CONFIG");
   }
   return Object.freeze({ telegram: Object.freeze({ ...telegram }) });
+}
+
+function adaptersConfig(raw) {
+  if (!raw || Array.isArray(raw) || typeof raw !== "object") fail("Configuration adapters must be a JSON object.", "INVALID_CONFIG");
+  const entries = {};
+  for (const [adapterId, settings] of Object.entries(raw)) {
+    if (!ADAPTER_IDS.includes(adapterId) || getAdapter(adapterId) === null) {
+      fail(`Configuration adapters contains an unknown adapter: ${adapterId}.`, "INVALID_CONFIG");
+    }
+    if (!settings || Array.isArray(settings) || typeof settings !== "object") {
+      fail(`Configuration adapters.${adapterId} must be a JSON object.`, "INVALID_CONFIG");
+    }
+    const allowedKeys = ["enabled"];
+    const settingKeys = Object.keys(settings);
+    if (settingKeys.some((key) => !allowedKeys.includes(key))) {
+      fail(`Configuration adapters.${adapterId} contains an unsupported key.`, "INVALID_CONFIG");
+    }
+    if (typeof settings.enabled !== "boolean") {
+      fail(`Configuration adapters.${adapterId}.enabled must be a boolean.`, "INVALID_CONFIG");
+    }
+    entries[adapterId] = Object.freeze({ enabled: settings.enabled });
+  }
+  return Object.freeze(entries);
 }
 
 function brainConfig(raw) {
@@ -115,6 +139,7 @@ export function loadConfig(configPath = path.resolve("hephaestus.config.json")) 
     registryPath: resolveConfigPath(configDirectory, raw.registryPath, "registryPath"),
     logDirectory: resolveConfigPath(configDirectory, raw.logDirectory, "logDirectory"),
     ...(raw.notifications === undefined ? {} : { notifications: notificationConfig(raw.notifications) }),
-    ...(raw.brain === undefined ? {} : { brain: brainConfig(raw.brain) })
+    ...(raw.brain === undefined ? {} : { brain: brainConfig(raw.brain) }),
+    ...(raw.adapters === undefined ? {} : { adapters: adaptersConfig(raw.adapters) })
   });
 }

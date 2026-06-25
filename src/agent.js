@@ -2,20 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fail } from "./errors.js";
+import { assertExecutionAllowed, requireAdapter } from "./agent-adapters.js";
 import { inspectProject } from "./inspection.js";
 import { runSandboxCommand } from "./sandbox.js";
 import { assertRealPathWithinRoot } from "./safe-path.js";
 import { saveState } from "./state.js";
 
 const MAX_ATTEMPTS = 3;
-const FIXTURE_ADAPTERS = Object.freeze({
-  "fixture-agent": "fixture-agent",
-  "fixture-agent-empty": "fixture-agent-empty",
-  "fixture-agent-crash": "fixture-agent-crash",
-  "fixture-agent-usage-limit": "fixture-agent-usage-limit",
-  "fixture-agent-blocker": "fixture-agent-blocker",
-  "fixture-agent-timeout": "fixture-agent-timeout"
-});
 const OUTPUT_SUMMARY_LIMIT = 240;
 
 function safePromptPath({ allowedRoot, projectPath, promptPath }) {
@@ -198,9 +191,8 @@ function createAgentRequest({ projectName, projectPath, adapterId, promptPath, d
 
 /** A process-backed fixture adapter whose process is always the sandboxed Docker command. */
 export function runAgentTask({ allowedRoot, projectPath, adapterId, promptPath }) {
-  if (!Object.hasOwn(FIXTURE_ADAPTERS, adapterId)) {
-    fail(`Agent adapter is not available in the sandbox: ${adapterId}.`, "AGENT_ADAPTER_NOT_AVAILABLE");
-  }
+  const adapter = requireAdapter(adapterId);
+  assertExecutionAllowed(adapter);
   const projectState = inspectProject(allowedRoot, projectPath);
   const sourcePromptPath = safePromptPath({ allowedRoot, projectPath: projectState.projectPath, promptPath });
   const prompt = readPrompt(sourcePromptPath);
@@ -220,7 +212,7 @@ export function runAgentTask({ allowedRoot, projectPath, adapterId, promptPath }
   const report = runSandboxCommand({
     allowedRoot,
     projectPath: projectState.projectPath,
-    commandId: FIXTURE_ADAPTERS[adapterId]
+    commandId: adapter.fixtureCommandId
   });
   const finishedAt = new Date().toISOString();
   const output = outputFromReport(report);

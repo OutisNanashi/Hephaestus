@@ -80,7 +80,7 @@ test("missing prompt, empty prompt, unknown adapter, and real adapter are reject
     assert.throws(() => runFixture(context), (error) => code(error, "PATH_RESOLUTION_FAILED"));
     fs.writeFileSync(path.join(context.projectPath, context.promptPath), "# Prompt\n");
     assert.throws(() => runFixture(context, "unknown-agent"), (error) => code(error, "AGENT_ADAPTER_NOT_AVAILABLE"));
-    assert.throws(() => runFixture(context, "codex"), (error) => code(error, "AGENT_ADAPTER_NOT_AVAILABLE"));
+    assert.throws(() => runFixture(context, "codex"), (error) => code(error, "REAL_AGENT_EXECUTION_DISABLED"));
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
