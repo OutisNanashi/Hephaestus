@@ -9,3 +9,5 @@ logs/
 tmp/
 node-v*-linux-*.tar.*
 node-v*-SHASUMS256.txt
+fixtures/projects/*/AGENT_OUTPUT.md
+fixtures/projects/*/out/agent_outputs/
