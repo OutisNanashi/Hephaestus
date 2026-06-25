@@ -10,6 +10,7 @@ import { runMockCycle } from "./mock-cycle.js";
 import { runSandboxCommand } from "./sandbox.js";
 import { runAgentTask } from "./agent.js";
 import { runAgentPreflight } from "./agent-preflight.js";
+import { createAgentRunPlan } from "./agent-run-plan.js";
 import { verifyTestEvidence } from "./test-gate.js";
 import { commitTask, createTaskBranch, fixturePr, recordGitMetadata } from "./git-workflow.js";
 import { validateProjectDirectory } from "./project.js";
@@ -22,7 +23,7 @@ import { globalProjectStatus, loadMultiProjectRegistry } from "./multi-project.j
 import { loadDashboardStatus } from "./dashboard.js";
 import { runLiveBrainCycle } from "./live-brain.js";
 
-const HELP = `Hephaestus Phase 10\n\nUsage:\n  hephaestus --help\n  hephaestus status [--config <file>]\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus live-brain [--config <file>] [--project <id>] [--task <task>]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus agent-preflight --adapter <id>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n\nCommands:\n  status        List each registered project without mutating state or starting work.\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  live-brain    Run one live configured brain call and save a bounded prompt; never runs an agent.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  agent-preflight Inspect an adapter without sending a prompt; real adapters cannot execute tasks.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n\nSafety:\n  Project status is read-only. Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Live brain calls save prompts only and never run coding agents. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
+const HELP = `Hephaestus Phase 10\n\nUsage:\n  hephaestus --help\n  hephaestus status [--config <file>]\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus live-brain [--config <file>] [--project <id>] [--task <task>]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus agent-preflight --adapter <id>\n  hephaestus agent-run-plan --project <id> --adapter <id> --prompt <relative-file>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus review ingest <project-name> --fixture <fixture-name>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n\nCommands:\n  status        List each registered project without mutating state or starting work.\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  live-brain    Run one live configured brain call and save a bounded prompt; never runs an agent.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  agent-preflight Inspect an adapter without sending a prompt; real adapters cannot execute tasks.\n  agent-run-plan Build a dry-run, secret-free run plan; real-agent execution stays blocked.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Produce or update a fixture pull request record for the current task.\n  review ingest Import a declared local review fixture; never contacts providers or merges.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n\nSafety:\n  Project status is read-only. Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Live brain calls save prompts only and never run coding agents. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
 
 const DASHBOARD_HELP = HELP
   .replace("Hephaestus Phase 10", "Hephaestus Phase 11")
@@ -135,7 +136,7 @@ function runInternal(argv, handlers = {}) {
   const reviewIngest = command === "review" && reviewSubcommand === "ingest";
   const mergeCommand = command === "merge" && ["check", "relay"].includes(mergeSubcommand);
   const notifyRender = command === "notify" && notifySubcommand === "render";
-  if (!["status","dashboard","validate","inspect","live-brain","cycle","sandbox-run","agent-run","agent-preflight","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest && !mergeCommand && !notifyRender) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  if (!["status","dashboard","validate","inspect","live-brain","cycle","sandbox-run","agent-run","agent-preflight","agent-run-plan","verify-tests","git-branch","git-commit","pr-open"].includes(command) && !reviewIngest && !mergeCommand && !notifyRender) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
 
   if (command === "agent-preflight") {
     if (!adapterId) throw new HephaestusError("agent-preflight requires --adapter.", "INVALID_ARGUMENT");
@@ -241,6 +242,19 @@ function runInternal(argv, handlers = {}) {
       reportPath: report.reportPath
     }, null, 2)}\n`);
     return report.status === "passed" ? 0 : 1;
+  }
+
+  if (command === "agent-run-plan") {
+    if (!adapterId || !promptPath) throw new HephaestusError("agent-run-plan requires --adapter and --prompt.", "INVALID_ARGUMENT");
+    const plan = createAgentRunPlan({
+      adapterId,
+      projectName: project.id,
+      projectPath: project.path,
+      allowedRoot: config.allowedRoot,
+      promptPath
+    });
+    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+    return 0;
   }
 
   if (command === "agent-run") {
