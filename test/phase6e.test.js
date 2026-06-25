@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -7,6 +8,8 @@ import { CLASSIFICATIONS, detectHelpEvidence, runCodexDiscovery } from "../src/a
 import { runCodexSmoke } from "../src/agent-smoke.js";
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
+
+const CLI_PATH = path.resolve("src/cli.js");
 
 function temporaryDirectory() { return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-")); }
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
@@ -218,6 +221,45 @@ test("CLI agent-discover emits classification JSON and exits non-zero when codex
   assert.equal(parsed.codexOnPath, false);
   assert.equal(parsed.step6fSafeToDesign, false);
   assert.notEqual(exitCode, 0);
+});
+
+test("spawned CLI agent-discover process exits non-zero with blocked classification when codex is missing", () => {
+  const directory = temporaryDirectory();
+  try {
+    const emptyPathDir = path.join(directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
+    const env = { ...process.env, PATH: emptyPathDir, Path: emptyPathDir, path: emptyPathDir };
+    const result = spawnSync(process.execPath, [CLI_PATH, "agent-discover", "--adapter", "codex"], {
+      encoding: "utf8",
+      shell: false,
+      env,
+      timeout: 30_000
+    });
+    assert.equal(result.error, undefined, `spawn failed: ${result.error?.message ?? ""}`);
+    assert.equal(typeof result.status, "number", "spawned CLI must terminate with a numeric exit code");
+    assert.notEqual(result.status, 0, `expected non-zero exit; got ${result.status}; stdout=${result.stdout}; stderr=${result.stderr}`);
+    assert.ok(result.stdout.includes(CLASSIFICATIONS.NOT_INSTALLED), `stdout missing classification: ${result.stdout}`);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.classification, CLASSIFICATIONS.NOT_INSTALLED);
+    assert.equal(parsed.step6fSafeToDesign, false);
+    for (const entry of parsed.discoveryCommands) {
+      assert.equal(entry.executable, "codex");
+      assert.equal(entry.shell, false);
+      assert.ok(entry.argv[0] === "--version" || entry.argv[0] === "--help");
+      assert.equal(entry.argv.length, 1);
+    }
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("spawned CLI agent-discover with an unsupported adapter exits non-zero", () => {
+  const result = spawnSync(process.execPath, [CLI_PATH, "agent-discover", "--adapter", "claude-code"], {
+    encoding: "utf8",
+    shell: false,
+    timeout: 30_000
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(typeof result.status, "number");
+  assert.notEqual(result.status, 0);
 });
 
 test("CLI agent-discover rejects non-codex adapter selections", () => {
