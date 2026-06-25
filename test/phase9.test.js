@@ -196,7 +196,24 @@ test("notification reports are deterministic per dedupe key and invalid events a
   }
 });
 
-test("notification report writes reject symlink targets without following them", async () => {
+function canCreateSymlinks() {
+  const probeDirectory = fs.mkdtempSync(path.join(path.resolve("test"), "symlink-probe-"));
+  const probeTarget = path.join(probeDirectory, "target");
+  const probeLink = path.join(probeDirectory, "link");
+  try {
+    fs.writeFileSync(probeTarget, "probe");
+    fs.symlinkSync(probeTarget, probeLink);
+    return true;
+  } catch (error) {
+    if (error && (error.code === "EPERM" || error.code === "ENOSYS" || error.code === "EACCES")) return false;
+    throw error;
+  } finally {
+    fs.rmSync(probeDirectory, { recursive: true, force: true });
+  }
+}
+
+test("notification report writes reject symlink targets without following them", async (t) => {
+  if (!canCreateSymlinks()) { t.skip("symlink creation is not available in this environment"); return; }
   const context = projectContext();
   try {
     const item = event({ dedupeKey: "phase9-symlink-report" });
