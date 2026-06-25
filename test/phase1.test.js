@@ -86,11 +86,24 @@ function normalizeLineEndings(value) {
 }
 
 test("reads a valid project fixture", () => {
-  const projectPath = path.resolve("fixtures/projects/example-project");
-  const projectState = inspectProject(path.resolve("fixtures/projects"), projectPath);
-  assert.equal(normalizeLineEndings(projectState.documents.plan), "# Example project\n\nThis fixture exists solely to prove Phase 0 project-file validation.\n");
-  assert.equal(projectState.documents.agentOutput, null);
-  assert.equal(projectState.documents.reviewNotes, null);
+  // Copy the canonical fixture to a tmpdir so leftover Step 6H/6I activation artifacts
+  // (AGENT_OUTPUT.md, out/*) on the host fixture do not bleed into this test.
+  const directory = temporaryDirectory();
+  try {
+    const allowedRoot = path.join(directory, "projects");
+    const projectPath = path.join(allowedRoot, "example-project");
+    const sourceRoot = path.resolve("fixtures/projects/example-project");
+    fs.mkdirSync(projectPath, { recursive: true });
+    for (const name of ["PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "CURRENT_TASK.md", "STATE.json"]) {
+      fs.copyFileSync(path.join(sourceRoot, name), path.join(projectPath, name));
+    }
+    const projectState = inspectProject(allowedRoot, projectPath);
+    assert.equal(normalizeLineEndings(projectState.documents.plan), "# Example project\n\nThis fixture exists solely to prove Phase 0 project-file validation.\n");
+    assert.equal(projectState.documents.agentOutput, null);
+    assert.equal(projectState.documents.reviewNotes, null);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("fails safely when PLAN.md is missing", () => {
