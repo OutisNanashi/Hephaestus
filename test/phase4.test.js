@@ -53,7 +53,7 @@ test("agent output is saved and BUILD_LOG.md is appended without overwrite", () 
     assert.match(fs.readFileSync(path.join(context.projectPath, "AGENT_OUTPUT.md"), "utf8"), /fixture-agent completed/u);
     const after = fs.readFileSync(path.join(context.projectPath, "BUILD_LOG.md"), "utf8");
     assert.ok(after.startsWith(before));
-    assert.match(after, /\[phase-4-agent-run\].*status=completed/u);
+    assert.match(after, /\[phase-6a-agent-run\].*status=completed/u);
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 

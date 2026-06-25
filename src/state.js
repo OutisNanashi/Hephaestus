@@ -8,7 +8,7 @@ const REQUIRED_STATE_KEYS = [
   "attemptCount", "blocked", "usageLimitPaused", "lastSuccessfulStep", "reviewStatus",
   "mergeStatus", "containerStatus", "lastGptDecision", "nextAction"
 ];
-const OPTIONAL_STATE_KEYS = new Set(["review", "mergeGate"]);
+const OPTIONAL_STATE_KEYS = new Set(["review", "mergeGate", "agent"]);
 const STRING_OR_NULL_KEYS = new Set(["currentPr", "assignedAgent", "lastSuccessfulStep", "lastGptDecision"]);
 
 function validateReviewDetails(review) {
@@ -45,6 +45,23 @@ function validateMergeGateDetails(mergeGate) {
   return Object.freeze({ ...mergeGate, mergeResult });
 }
 
+function validateAgentDetails(agent) {
+  const keys = ["lastRunId", "adapterId", "status", "exitCode", "startedAt", "finishedAt", "promptPath", "outputPath", "outputSummary", "usageLimitDetected", "blockerDetected", "errorCategory"];
+  if (!agent || Array.isArray(agent) || typeof agent !== "object" || keys.some((key) => !(key in agent)) || Object.keys(agent).some((key) => !keys.includes(key))) fail("STATE.json agent has an invalid schema.", "INVALID_STATE");
+  if (!["running", "completed", "blocked", "failed", "paused"].includes(agent.status)) fail("STATE.json agent status is invalid.", "INVALID_STATE");
+  for (const key of ["lastRunId", "adapterId", "startedAt", "promptPath", "outputSummary"]) {
+    if (typeof agent[key] !== "string" || agent[key].trim() === "") fail(`STATE.json agent ${key} must be a non-empty string.`, "INVALID_STATE");
+  }
+  for (const key of ["finishedAt", "outputPath", "errorCategory"]) {
+    if (agent[key] !== null && (typeof agent[key] !== "string" || agent[key].trim() === "")) fail(`STATE.json agent ${key} must be a string or null.`, "INVALID_STATE");
+  }
+  if (agent.exitCode !== null && !Number.isSafeInteger(agent.exitCode)) fail("STATE.json agent exitCode must be an integer or null.", "INVALID_STATE");
+  for (const key of ["usageLimitDetected", "blockerDetected"]) {
+    if (typeof agent[key] !== "boolean") fail(`STATE.json agent ${key} must be a boolean.`, "INVALID_STATE");
+  }
+  return Object.freeze({ ...agent });
+}
+
 export function validateState(state) {
   if (state === null || Array.isArray(state) || typeof state !== "object") {
     fail("STATE.json must contain an object.", "INVALID_STATE");
@@ -73,7 +90,8 @@ export function validateState(state) {
   }
   const review = "review" in state ? validateReviewDetails(state.review) : undefined;
   const mergeGate = "mergeGate" in state ? validateMergeGateDetails(state.mergeGate) : undefined;
-  return Object.freeze({ ...state, ...(review === undefined ? {} : { review }), ...(mergeGate === undefined ? {} : { mergeGate }) });
+  const agent = "agent" in state ? validateAgentDetails(state.agent) : undefined;
+  return Object.freeze({ ...state, ...(review === undefined ? {} : { review }), ...(mergeGate === undefined ? {} : { mergeGate }), ...(agent === undefined ? {} : { agent }) });
 }
 
 export function loadState(projectPath) {

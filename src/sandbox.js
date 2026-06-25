@@ -16,15 +16,17 @@ const NPM_TEST_TIMEOUT_MS = 15_000;
 const ALLOWLIST = Object.freeze({
   "test-echo": Object.freeze({ script: "printf 'sandbox-ok\\n'" }),
   "test-stderr": Object.freeze({ script: "printf 'sandbox-out\\n'; printf 'sandbox-err\\n' >&2; exit 7" }),
-  "test-timeout": Object.freeze({ script: "sleep 5" }),
+  "test-timeout": Object.freeze({ script: "sleep 5", timeoutMs: COMMAND_TIMEOUT_MS }),
   "test-workspace": Object.freeze({ script: "test -d /workspace && test -f /workspace/PLAN.md" }),
   "test-host-inaccessible": Object.freeze({ script: "test ! -e /host && test ! -e /mnt/c" }),
   "test-identity": Object.freeze({ script: "printf 'workspace=%s\\n' \"$PWD\"; printf 'hostname=%s\\n' \"$(hostname)\"" }),
-  "test-npm": Object.freeze({ script: "npm test" })
-  , "fixture-agent": Object.freeze({ script: "test -f /workspace/out/prompts/next-task.md && printf 'fixture-agent received prompt:\\n'; cat /workspace/out/prompts/next-task.md; printf '\\nfixture-agent completed\\n'" })
+  "test-npm": Object.freeze({ script: "npm test", timeoutMs: NPM_TEST_TIMEOUT_MS })
+  , "fixture-agent": Object.freeze({ script: "test -f /workspace/out/agent_runs/current/prompt.md && printf 'fixture-agent received prompt:\\n'; cat /workspace/out/agent_runs/current/prompt.md; printf '\\nfixture-agent completed\\n'" })
   , "fixture-agent-empty": Object.freeze({ script: ":" })
   , "fixture-agent-crash": Object.freeze({ script: "printf 'fixture-agent crashed\\n' >&2; exit 23" })
   , "fixture-agent-usage-limit": Object.freeze({ script: "printf 'usage limit reached; try again later\\n'" })
+  , "fixture-agent-blocker": Object.freeze({ script: "printf 'BLOCKED: required file is missing\\n'" })
+  , "fixture-agent-timeout": Object.freeze({ script: "sleep 5", timeoutMs: COMMAND_TIMEOUT_MS })
 });
 
 function dockerEnvironment() {
@@ -144,8 +146,8 @@ export function runSandboxCommand({ allowedRoot, projectPath, commandId }) {
   let result;
   let cleanup;
   try {
-    const timeout = commandId === "test-timeout" ? COMMAND_TIMEOUT_MS : commandId === "test-npm" ? NPM_TEST_TIMEOUT_MS : DOCKER_LIFECYCLE_TIMEOUT_MS;
-    result = dockerResult(sandboxArgs(projectState.projectPath, name, ALLOWLIST[commandId].script), timeout);
+    const command = ALLOWLIST[commandId];
+    result = dockerResult(sandboxArgs(projectState.projectPath, name, command.script), command.timeoutMs ?? DOCKER_LIFECYCLE_TIMEOUT_MS);
   } finally {
     cleanup = cleanupSandbox(name);
   }
