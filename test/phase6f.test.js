@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   CLASSIFICATIONS,
+  CLASSIFICATION_PRIORITY,
   READONLY_SMOKE_ARGV,
   READONLY_SMOKE_FLAGS,
   READONLY_SMOKE_MARKER,
@@ -248,6 +249,131 @@ test("readonly smoke unauthenticated text classifies as STEP_6F_BLOCKED_CODEX_NO
     const spawn = fakeSpawn(() => ({ status: 1, stdout: "", stderr: "Not authenticated. Please sign in by running `codex login`.\n" }));
     const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
     assert.equal(report.classification, CLASSIFICATIONS.NOT_AUTHENTICATED);
+    assert.equal(report.usageLimitDetected, false);
+    assert.equal(report.retryAfter, null);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("readonly smoke usage-limit text classifies as STEP_6F_BLOCKED_CODEX_USAGE_LIMIT and does NOT count as auth failure or generic nonzero", () => {
+  const context = makeContext();
+  try {
+    const usageStderr = "ERROR: You've hit your usage limit. Upgrade to Pro, visit https://chatgpt.com/explore/pro, visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Jun 30th, 2026 2:12 PM.\n";
+    const spawn = fakeSpawn(() => ({ status: 1, stdout: "", stderr: usageStderr }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.USAGE_LIMIT);
+    assert.notEqual(report.classification, CLASSIFICATIONS.NOT_AUTHENTICATED);
+    assert.notEqual(report.classification, CLASSIFICATIONS.EXIT_NONZERO);
+    assert.equal(report.usageLimitDetected, true);
+    assert.equal(report.retryAfter, "Jun 30th, 2026 2:12 PM");
+    assert.match(report.manualAction, /Codex usage limit reached\./u);
+    assert.match(report.manualAction, /Wait until the reported reset time/u);
+    assert.equal(report.step6gSafeToDesign, false);
+    assert.equal(report.projectMutated, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("usage-limit detection matches multiple phrasings without retry-time text", () => {
+  const context = makeContext();
+  try {
+    for (const stderr of [
+      "ERROR: You've hit your usage limit. Upgrade to Pro.\n",
+      "ERROR: Visit https://chatgpt.com/codex/settings/usage to purchase more credits.\n",
+      "ERROR: rate limit exceeded\n",
+      "ERROR: 429 too many requests\n",
+      "ERROR: quota exceeded for this project\n"
+    ]) {
+      const spawn = fakeSpawn(() => ({ status: 1, stdout: "", stderr }));
+      const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+      assert.equal(report.classification, CLASSIFICATIONS.USAGE_LIMIT, `expected USAGE_LIMIT for stderr: ${stderr}`);
+      assert.equal(report.usageLimitDetected, true);
+      assert.equal(report.retryAfter, null, `no retry time expected for stderr: ${stderr}`);
+    }
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("authentication text still wins over usage-limit text when both are present", () => {
+  const context = makeContext();
+  try {
+    const combinedStderr = "ERROR: 401 Unauthorized. Please sign in by running `codex login`.\nNote: account also has usage limit reached.\n";
+    const spawn = fakeSpawn(() => ({ status: 1, stdout: "", stderr: combinedStderr }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.NOT_AUTHENTICATED);
+    assert.equal(report.usageLimitDetected, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("mutation detection still outranks usage-limit text", () => {
+  const context = makeContext();
+  try {
+    const usageStderr = "ERROR: You've hit your usage limit. try again at Jun 30th, 2026 2:12 PM.\n";
+    const spawn = fakeSpawn((exe, args, options) => {
+      fs.writeFileSync(path.join(options.cwd, "PLAN.md"), "# Mutated\n");
+      return { status: 1, stdout: "", stderr: usageStderr };
+    });
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.MUTATION_DETECTED);
+    assert.equal(report.projectMutated, true);
+    assert.equal(report.usageLimitDetected, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("timeout still outranks usage-limit text", () => {
+  const context = makeContext();
+  try {
+    const usageStderr = "ERROR: You've hit your usage limit. try again at later.\n";
+    const spawn = fakeSpawn(() => ({
+      status: null, signal: "SIGTERM", stdout: "", stderr: usageStderr,
+      error: Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })
+    }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.TIMEOUT);
+    assert.equal(report.timedOut, true);
+    assert.equal(report.usageLimitDetected, false);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("generic nonzero exit without usage-limit / auth / interactive text still classifies as EXIT_NONZERO", () => {
+  const context = makeContext();
+  try {
+    const spawn = fakeSpawn(() => ({ status: 7, stdout: "", stderr: "some unrelated codex error happened\n" }));
+    const report = runCodexReadonlySmoke(baseRequest(context, { spawn }));
+    assert.equal(report.classification, CLASSIFICATIONS.EXIT_NONZERO);
+    assert.equal(report.usageLimitDetected, false);
+    assert.equal(report.retryAfter, null);
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("classification priority order is timeout > mutation > auth > usage-limit > interaction > nonzero > marker-missing > pass (NOT_INSTALLED guards everything)", () => {
+  assert.deepEqual([...CLASSIFICATION_PRIORITY], [
+    CLASSIFICATIONS.NOT_INSTALLED,
+    CLASSIFICATIONS.TIMEOUT,
+    CLASSIFICATIONS.MUTATION_DETECTED,
+    CLASSIFICATIONS.NOT_AUTHENTICATED,
+    CLASSIFICATIONS.USAGE_LIMIT,
+    CLASSIFICATIONS.INTERACTIVE,
+    CLASSIFICATIONS.EXIT_NONZERO,
+    CLASSIFICATIONS.MARKER_MISSING,
+    CLASSIFICATIONS.PASS
+  ]);
+});
+
+test("usage-limit classification exits non-zero through the CLI runner", () => {
+  const context = makeContext();
+  try {
+    const configPath = path.join(context.directory, "config.json");
+    const registryPath = path.join(context.directory, "projects.json");
+    writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
+    writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    let stdout = "";
+    const originalWrite = process.stdout.write;
+    let exitCode;
+    try {
+      process.stdout.write = (chunk) => { stdout += chunk; return true; };
+      exitCode = runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]);
+    } finally { process.stdout.write = originalWrite; }
+    const parsed = JSON.parse(stdout);
+    assert.notEqual(parsed.classification, CLASSIFICATIONS.PASS);
+    assert.notEqual(exitCode, 0);
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 

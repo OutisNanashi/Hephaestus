@@ -61,6 +61,7 @@ export const CLASSIFICATIONS = Object.freeze({
   PASS: "STEP_6F_PASS",
   NOT_INSTALLED: "STEP_6F_BLOCKED_CODEX_NOT_INSTALLED",
   NOT_AUTHENTICATED: "STEP_6F_BLOCKED_CODEX_NOT_AUTHENTICATED",
+  USAGE_LIMIT: "STEP_6F_BLOCKED_CODEX_USAGE_LIMIT",
   EXIT_NONZERO: "STEP_6F_BLOCKED_CODEX_EXIT_NONZERO",
   TIMEOUT: "STEP_6F_BLOCKED_CODEX_TIMEOUT",
   MARKER_MISSING: "STEP_6F_BLOCKED_MARKER_MISSING",
@@ -78,6 +79,19 @@ const AUTH_REQUIRED_PATTERNS = [
   /401\b/u
 ];
 
+const USAGE_LIMIT_PATTERNS = [
+  /you(?:'|`|’)?ve\s+hit\s+your\s+usage\s+limit/iu,
+  /\busage\s+limit\b/iu,
+  /purchase\s+more\s+credits/iu,
+  /codex\/settings\/usage/iu,
+  /\btry\s+again\s+at\b/iu,
+  /\brate\s+limit\b/iu,
+  /\btoo\s+many\s+requests\b/iu,
+  /\bquota\s+exceeded\b/iu
+];
+
+const RETRY_AFTER_PATTERN = /try\s+again\s+at\s+([^.\n]{1,80})/iu;
+
 const INTERACTIVE_PATTERNS = [
   /requires?\s+a\s+terminal/iu,
   /tty\s+required/iu,
@@ -87,6 +101,30 @@ const INTERACTIVE_PATTERNS = [
   /waiting\s+for\s+approval/iu,
   /approval\s+required/iu
 ];
+
+export const CLASSIFICATION_PRIORITY = Object.freeze([
+  CLASSIFICATIONS.NOT_INSTALLED,
+  CLASSIFICATIONS.TIMEOUT,
+  CLASSIFICATIONS.MUTATION_DETECTED,
+  CLASSIFICATIONS.NOT_AUTHENTICATED,
+  CLASSIFICATIONS.USAGE_LIMIT,
+  CLASSIFICATIONS.INTERACTIVE,
+  CLASSIFICATIONS.EXIT_NONZERO,
+  CLASSIFICATIONS.MARKER_MISSING,
+  CLASSIFICATIONS.PASS
+]);
+
+function detectUsageLimit(text) {
+  return USAGE_LIMIT_PATTERNS.some((rx) => rx.test(text));
+}
+
+function extractRetryAfter(text) {
+  const match = RETRY_AFTER_PATTERN.exec(text);
+  if (match === null) return null;
+  const trimmed = match[1].trim().replace(/[\s,]+$/u, "");
+  if (trimmed.length === 0 || trimmed.length > 80) return null;
+  return trimmed;
+}
 
 function defaultSpawn(executable, args, options) {
   return spawnSync(executable, args, { ...options, shell: false });
@@ -195,13 +233,14 @@ function classify({ spawnError, errorCode, timedOut, exitCode, stdout, stderr, p
     return CLASSIFICATIONS.NOT_INSTALLED;
   }
   if (timedOut) return CLASSIFICATIONS.TIMEOUT;
+  if (projectMutated) return CLASSIFICATIONS.MUTATION_DETECTED;
   if (AUTH_REQUIRED_PATTERNS.some((rx) => rx.test(combined))) {
     return CLASSIFICATIONS.NOT_AUTHENTICATED;
   }
+  if (detectUsageLimit(combined)) return CLASSIFICATIONS.USAGE_LIMIT;
   if (INTERACTIVE_PATTERNS.some((rx) => rx.test(combined))) {
     return CLASSIFICATIONS.INTERACTIVE;
   }
-  if (projectMutated) return CLASSIFICATIONS.MUTATION_DETECTED;
   if (typeof exitCode !== "number" || exitCode !== 0) return CLASSIFICATIONS.EXIT_NONZERO;
   if (!combined.includes(READONLY_SMOKE_MARKER)) return CLASSIFICATIONS.MARKER_MISSING;
   return CLASSIFICATIONS.PASS;
@@ -213,6 +252,8 @@ function manualActionFor(classification) {
       return "Install the Codex CLI in the activation environment and ensure `codex` resolves on PATH before retrying Step 6F.";
     case CLASSIFICATIONS.NOT_AUTHENTICATED:
       return "Authenticate the Codex CLI (e.g. `codex login`) using your normal interactive flow, then retry Step 6F.";
+    case CLASSIFICATIONS.USAGE_LIMIT:
+      return "Codex usage limit reached. Wait until the reported reset time or add Codex credits, then retry Step 6F.";
     case CLASSIFICATIONS.TIMEOUT:
       return "Codex did not respond within the read-only smoke timeout; investigate Codex availability before retrying.";
     case CLASSIFICATIONS.EXIT_NONZERO:
@@ -297,7 +338,10 @@ export function runCodexReadonlySmoke(request) {
   const projectMutated = mutatedFiles.length > 0;
 
   const classification = classify({ spawnError, errorCode, timedOut, exitCode, stdout, stderr, projectMutated });
-  const markerCaptured = `${stdout}${stderr}`.includes(READONLY_SMOKE_MARKER);
+  const combinedOutput = `${stdout}${stderr}`;
+  const markerCaptured = combinedOutput.includes(READONLY_SMOKE_MARKER);
+  const usageLimitDetected = classification === CLASSIFICATIONS.USAGE_LIMIT;
+  const retryAfter = usageLimitDetected ? extractRetryAfter(combinedOutput) : null;
 
   const report = Object.freeze({
     classification,
@@ -331,6 +375,8 @@ export function runCodexReadonlySmoke(request) {
     timedOut,
     markerCaptured: markerCaptured && classification === CLASSIFICATIONS.PASS,
     markerInOutput: markerCaptured,
+    usageLimitDetected,
+    retryAfter,
     projectMutated,
     mutatedFiles: Object.freeze(mutatedFiles),
     step6gSafeToDesign: classification === CLASSIFICATIONS.PASS,
