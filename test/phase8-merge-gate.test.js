@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { run } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 import { evaluateMergeReadiness } from "../src/merge-gate.js";
 import { loadState } from "../src/state.js";
 import { loadTestDeclaration, projectFingerprint, saveTestEvidence } from "../src/test-gate.js";
+
+process.chdir(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
 
 const timestamp = "2026-07-02T12:00:00.000Z";
 const state = Object.freeze({ currentPhase: "8", currentTask: "merge-gate", currentBranch: "phase8", currentPr: "https://fixture.invalid/pr/8", assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: "review-ingestion", reviewStatus: "ingested", mergeStatus: "blocked", containerStatus: "healthy", lastGptDecision: null, nextAction: "merge-readiness" });
