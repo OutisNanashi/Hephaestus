@@ -208,7 +208,7 @@ function runInternal(argv, handlers = {}) {
     const validated = validateProjectDirectory(config.allowedRoot, project.path);
     const fixture = mergeFixture(config.allowedRoot, fixturePath);
     const report = evaluateMergeReadiness({ projectPath: validated.path, state: validated.state, input: fixture, now: fixture.now });
-    const reportPath = saveMergeReadinessReport(validated.path, report);
+    const reportPath = saveMergeReadinessReport(validated.path, { reportMode: "legacy", ...report });
     const relay = mergeSubcommand === "relay" && report.allowed ? createMergeRelay(report) : null;
     process.stdout.write(`${JSON.stringify({ allowed: report.allowed, blockers: report.blockers, reportPath, relay }, null, 2)}\n`);
     return report.allowed ? 0 : 1;
@@ -253,7 +253,7 @@ function runInternal(argv, handlers = {}) {
     const headSha = { approved: report.approval?.headCommit ?? null, current: report.pr?.headCommit ?? null };
     headSha.match = headSha.approved !== null && headSha.approved === headSha.current;
     const gatesChecked = ["state", "implementation", "tests", "retest-after-fix", "reviews", "gpt-approval", "git-pr", "safety"];
-    const reportPath = saveMergeReadinessReport(validated.path, { ready: report.allowed, gatesChecked, headSha, ...report });
+    const reportPath = saveMergeReadinessReport(validated.path, { reportMode: "merge-check", ready: report.allowed, gatesChecked, headSha, ...report });
     process.stdout.write(`${JSON.stringify({ ready: report.allowed, blockers: report.blockers.map((item) => item.code), gatesChecked, headSha, reportPath }, null, 2)}\n`);
     return report.allowed ? 0 : 1;
   }

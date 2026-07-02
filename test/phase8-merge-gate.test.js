@@ -67,7 +67,7 @@ test("golden path: merge-check allows when every local gate passes and writes a 
     assert.equal(output.ready, true);
     assert.deepEqual(output.blockers, []);
     assert.equal(output.headSha.match, true);
-    const expected = path.join(c.project, "out", "merge_reports", "phase-8-pr-8.json");
+    const expected = path.join(c.project, "out", "merge_reports", "phase-8-pr-8-merge-check.json");
     assert.equal(output.reportPath, expected);
     const report = JSON.parse(fs.readFileSync(expected, "utf8"));
     assert.equal(report.ready, true);
@@ -96,6 +96,8 @@ test("blocked without test evidence and with failed / missing-command / outputle
     assert.ok(blockers(gate(c)).includes("FAILED_TESTS"));
     saveTestEvidence(c.project, { projectFingerprint: projectFingerprint(c.project, loadTestDeclaration(c.project)), commands: [] });
     assert.ok(blockers(gate(c)).includes("MISSING_REQUIRED_TEST_COMMAND"));
+    saveTestEvidence(c.project, { projectFingerprint: projectFingerprint(c.project, loadTestDeclaration(c.project)), commands: [{ id: "unit", exitCode: 0, stdout: "", stderr: "" }] });
+    assert.ok(blockers(gate(c)).includes("MISSING_TEST_OUTPUT"));
   } finally { cleanup(c); }
 });
 
@@ -167,6 +169,6 @@ test("merge-check writes only inside the project; no root STATE.json or BUILD_LO
     assert.equal(fs.existsSync(path.resolve("STATE.json")), rootStateBefore);
     assert.equal(fs.existsSync(path.resolve("BUILD_LOG.md")), rootLogBefore);
     assert.equal(fs.readFileSync(path.resolve("PLAN.md"), "utf8"), planBefore);
-    assert.ok(fs.existsSync(path.join(c.project, "out", "merge_reports", "phase-8-pr-8.json")));
+    assert.ok(fs.existsSync(path.join(c.project, "out", "merge_reports", "phase-8-pr-8-merge-check.json")));
   } finally { cleanup(c); }
 });
