@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { spawnCliSync } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLEANUP_WHITELIST,
@@ -12,7 +12,7 @@ import {
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 
-const CLI_PATH = path.resolve("src/cli.js");
+const CLI_PATH = "src/cli.js";
 
 const validState = Object.freeze({
   currentPhase: "6J", currentTask: "activation-fixture-hygiene", currentBranch: "main", currentPr: null,
@@ -328,7 +328,7 @@ test("spawned CLI activation-clean-fixture-artifacts exits 0 after removing arti
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "example-project", path: "example-project" }] });
-    const result = spawnSync(process.execPath, [CLI_PATH, "activation-clean-fixture-artifacts", "--config", configPath, "--project", "example-project"], {
+    const result = spawnCliSync(process.execPath, [CLI_PATH, "activation-clean-fixture-artifacts", "--config", configPath, "--project", "example-project"], {
       encoding: "utf8",
       shell: false,
       timeout: 60_000

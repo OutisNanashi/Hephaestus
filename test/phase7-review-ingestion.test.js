@@ -108,6 +108,25 @@ test("re-ingesting the same mocked source is idempotent and deduplicates", () =>
   } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
 
+test("review ingestion saves STATE.json with a same-directory temp file", { concurrency: false }, () => {
+  const c = context();
+  const originalRename = fs.renameSync;
+  try {
+    fs.renameSync = (from, to) => {
+      if (path.basename(to) === "STATE.json") {
+        assert.equal(path.dirname(from), path.dirname(to));
+        throw Object.assign(new Error("simulated EXDEV"), { code: "EXDEV" });
+      }
+      return originalRename(from, to);
+    };
+    const result = ingest(c);
+    assert.equal(result.exit, 0);
+  } finally {
+    fs.renameSync = originalRename;
+    fs.rmSync(c.directory, { recursive: true, force: true });
+  }
+});
+
 test("dismissing a required actionable comment without a GPT decision is rejected", () => {
   assert.throws(
     () => normalizeReviewItem({ source: "CodeRabbit", body: "Must fix.", status: "dismissed", actionable: true }, { timestamp: "2026-07-02T09:00:00.000Z" }),

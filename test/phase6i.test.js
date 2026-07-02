@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { spawnCliSync } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLASSIFICATION_PRIORITY,
@@ -20,7 +20,7 @@ import {
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 
-const CLI_PATH = path.resolve("src/cli.js");
+const CLI_PATH = "src/cli.js";
 
 const validState = Object.freeze({
   currentPhase: "6I", currentTask: "codex-readonly-prompt-record", currentBranch: "main", currentPr: null,
@@ -551,7 +551,7 @@ test("spawned CLI agent-codex-readonly-prompt-record exits non-zero when codex i
     const emptyPathDir = path.join(context.directory, "empty-path");
     fs.mkdirSync(emptyPathDir);
     const env = { ...process.env, PATH: emptyPathDir, Path: emptyPathDir, path: emptyPathDir };
-    const result = spawnSync(process.execPath, [CLI_PATH, "agent-codex-readonly-prompt-record", "--config", configPath, "--project", "example-project"], {
+    const result = spawnCliSync(process.execPath, [CLI_PATH, "agent-codex-readonly-prompt-record", "--config", configPath, "--project", "example-project"], {
       encoding: "utf8",
       shell: false,
       env,

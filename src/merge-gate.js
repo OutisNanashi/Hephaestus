@@ -103,7 +103,9 @@ function mergeReportPath(projectPath, report) {
   const phase = typeof report.phase === "string" || Number.isSafeInteger(report.phase) ? String(report.phase) : "";
   const safePhase = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(phase) && !phase.includes("..") ? phase : "unknown";
   const safePr = Number.isSafeInteger(report.pr?.number) ? String(report.pr.number) : "unknown";
-  return path.join(directory, `phase-${safePhase}-pr-${safePr}.json`);
+  const mode = typeof report.reportMode === "string" ? report.reportMode : "legacy";
+  const safeMode = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(mode) && !mode.includes("..") ? mode : "unknown";
+  return path.join(directory, `phase-${safePhase}-pr-${safePr}-${safeMode}.json`);
 }
 
 export function saveMergeReadinessReport(projectPath, report) {

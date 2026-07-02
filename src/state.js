@@ -138,25 +138,40 @@ export function saveState(projectPath, state) {
   const validatedState = validateState(state);
   const resolvedProjectPath = assertRealPathWithinRoot(projectPath, projectPath);
   const statePath = path.join(resolvedProjectPath, "STATE.json");
-  let temporaryDirectory;
+  const serializedState = `${JSON.stringify(validatedState, null, 2)}\n`;
+  let temporaryStatePath;
   try {
     rejectStateSymlink(statePath);
     const stateMode = existingStateMode(statePath);
-    temporaryDirectory = fs.mkdtempSync(path.join(resolvedProjectPath, ".state-write-"));
-    const temporaryStatePath = path.join(temporaryDirectory, "STATE.json");
-    fs.writeFileSync(temporaryStatePath, `${JSON.stringify(validatedState, null, 2)}\n`, {
+    temporaryStatePath = path.join(resolvedProjectPath, `.STATE.json.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
+    fs.writeFileSync(temporaryStatePath, serializedState, {
       encoding: "utf8",
       flag: "wx",
       ...(stateMode === undefined ? {} : { mode: stateMode })
     });
     if (stateMode !== undefined) fs.chmodSync(temporaryStatePath, stateMode);
     rejectStateSymlink(statePath);
-    fs.renameSync(temporaryStatePath, statePath);
+    try {
+      fs.renameSync(temporaryStatePath, statePath);
+    } catch (error) {
+      if (error?.code !== "EXDEV") throw error;
+      rejectStateSymlink(statePath);
+      try { fs.unlinkSync(statePath); } catch (unlinkError) { if (unlinkError?.code !== "ENOENT") throw unlinkError; }
+      rejectStateSymlink(statePath);
+      fs.writeFileSync(statePath, serializedState, {
+        encoding: "utf8",
+        flag: "wx",
+        ...(stateMode === undefined ? {} : { mode: stateMode })
+      });
+      if (stateMode !== undefined) fs.chmodSync(statePath, stateMode);
+      fs.rmSync(temporaryStatePath, { force: true });
+      temporaryStatePath = undefined;
+    }
   } catch (error) {
     if (error?.code === "OUTSIDE_ALLOWED_ROOT") throw error;
     fail(`STATE.json could not be written: ${error.message}`, "STATE_WRITE_FAILED");
   } finally {
-    if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    if (temporaryStatePath) fs.rmSync(temporaryStatePath, { force: true });
   }
   return validatedState;
 }
