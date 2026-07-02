@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-07-02T09:00:00.000Z",
+  "sources": [
+    {
+      "source": "CodeRabbit",
+      "comments": [
+        {
+          "externalId": "coderabbit-201",
+          "filePath": "src/example.js",
+          "line": 12,
+          "severity": "high",
+          "category": "correctness",
+          "body": "Guard the empty-input case before indexing the list.",
+          "actionable": true,
+          "url": "https://fixture.invalid/reviews/201"
+        }
+      ]
+    },
+    {
+      "source": "Copilot",
+      "comments": [
+        {
+          "externalId": "copilot-77",
+          "filePath": "src/example.js",
+          "line": 30,
+          "severity": "low",
+          "category": "style",
+          "body": "Prefer const over let for this binding.",
+          "actionable": false,
+          "status": "dismissed",
+          "gptDecision": {
+            "dismissed": true,
+            "reason": "Style preference outside this phase's scope.",
+            "decidedAt": "2026-07-02T09:05:00.000Z"
+          }
+        }
+      ]
+    },
+    { "source": "Qodo", "availability": "paused" }
+  ]
+}
