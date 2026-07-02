@@ -1,9 +1,12 @@
-import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { redactPreflightText, requireAdapter } from "./agent-adapters.js";
+import { requireAdapter } from "./agent-adapters.js";
 import { HephaestusError, fail } from "./errors.js";
+import {
+  CODEX_OUTCOMES, FORBIDDEN_ARGV_TOKENS, FORBIDDEN_SANDBOX_VALUES,
+  classifyCodexOutcome, diffSnapshots, disallowedChanges,
+  runReadonlyCodex, sha256Hex, snapshotProjectFiles, summarizeOutput
+} from "./readonly-handoff-pipeline.js";
 import { assertRealPathWithinRoot, resolveSafePath } from "./safe-path.js";
 import {
   REQUIRED_REPORT_KEYS,
@@ -28,8 +31,6 @@ const REPORT_VALUE_LIMIT = 200;
 const REPORT_ALLOWED_KEYS = new Set([...REQUIRED_REPORT_KEYS]);
 
 const STEP_6M_TIMEOUT_MS = 120_000;
-const SAFE_ENVIRONMENT = Object.freeze({ LANG: "C.UTF-8" });
-const OUTPUT_SUMMARY_LIMIT = 240;
 
 const PATH_ERROR_CODES = new Set(["OUTSIDE_ALLOWED_ROOT", "INVALID_PATH", "UNSAFE_PATH", "INVALID_PROJECT_PATH", "PATH_RESOLUTION_FAILED"]);
 
@@ -37,13 +38,6 @@ const ALLOWED_REQUEST_KEYS = new Set([
   "adapterId", "allowedRoot", "projectPath", "projectId", "env", "spawn",
   "explicitProviderHandoffPermit", "timeoutMs", "now", "reportName", "provider"
 ]);
-
-const FORBIDDEN_ARGV_TOKENS = Object.freeze([
-  "--dangerously-bypass-approvals-and-sandbox",
-  "--dangerously-bypass-hook-trust",
-  "--add-dir", "--search", "-c"
-]);
-const FORBIDDEN_SANDBOX_VALUES = Object.freeze(["workspace-write", "danger-full-access"]);
 
 export const STEP_6M_FLAGS = Object.freeze({
   sandbox: "read-only", sandboxScope: "top-level",
@@ -77,23 +71,6 @@ export const CLASSIFICATIONS = Object.freeze({
   ARTIFACT_WRITE_FAILED: "STEP_6M_BLOCKED_ARTIFACT_WRITE_FAILED",
   FORBIDDEN_MUTATION: "STEP_6M_BLOCKED_FORBIDDEN_MUTATION"
 });
-
-const AUTH_REQUIRED_PATTERNS = [
-  /please\s+(?:sign\s+in|log\s+in|login)/iu, /not\s+authenticated/iu,
-  /authentication\s+required/iu, /run\s+`?codex\s+login`?/iu,
-  /unauthorized/iu, /401\b/u
-];
-const USAGE_LIMIT_PATTERNS = [
-  /you(?:'|`|’)?ve\s+hit\s+your\s+usage\s+limit/iu, /\busage\s+limit\b/iu,
-  /purchase\s+more\s+credits/iu, /codex\/settings\/usage/iu,
-  /\btry\s+again\s+at\b/iu, /\brate\s+limit\b/iu,
-  /\btoo\s+many\s+requests\b/iu, /\bquota\s+exceeded\b/iu
-];
-const INTERACTIVE_PATTERNS = [
-  /requires?\s+a\s+terminal/iu, /tty\s+required/iu,
-  /interactive\s+mode\s+only/iu, /interactive\s+login\s+required/iu,
-  /press\s+(?:enter|any\s+key)/iu, /waiting\s+for\s+approval/iu, /approval\s+required/iu
-];
 
 export function buildStep6mPrompt(projectId) {
   if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
@@ -205,50 +182,10 @@ export function parseStep6mReport(output, { expectedProjectId, expectedPromptSou
   };
 }
 
-function defaultSpawn(executable, args, options) {
-  return spawnSync(executable, args, { ...options, shell: false });
-}
 function defaultNow() { return new Date().toISOString(); }
 
-function hashFile(filePath) {
-  let stat;
-  try { stat = fs.statSync(filePath); } catch { return null; }
-  if (!stat.isFile()) return null;
-  return createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
-}
-
-function walkAll(projectPath, currentDirectory, accumulator) {
-  let entries;
-  try { entries = fs.readdirSync(currentDirectory, { withFileTypes: true }); } catch { return; }
-  for (const entry of entries) {
-    if (entry.name === ".git" || entry.name === "node_modules") continue;
-    const full = path.join(currentDirectory, entry.name);
-    if (entry.isDirectory()) walkAll(projectPath, full, accumulator);
-    else if (entry.isFile()) {
-      const rel = path.relative(projectPath, full).split(path.sep).join("/");
-      accumulator[rel] = hashFile(full);
-    }
-  }
-}
-
-function snapshotAll(projectPath) {
-  const acc = {};
-  walkAll(projectPath, projectPath, acc);
-  return acc;
-}
-
-function diffSnapshots(before, after) {
-  const changed = [];
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  for (const key of keys) if (before[key] !== after[key]) changed.push(key);
-  return changed.sort();
-}
-
-function summarize(text) {
-  const trimmed = text.replace(/\s+/gu, " ").trim();
-  if (trimmed === "") return "No output captured.";
-  return trimmed.length > OUTPUT_SUMMARY_LIMIT ? `${trimmed.slice(0, OUTPUT_SUMMARY_LIMIT)}...` : trimmed;
-}
+const snapshotAll = snapshotProjectFiles;
+const summarize = summarizeOutput;
 
 function assertRequestShape(request) {
   if (!request || Array.isArray(request) || typeof request !== "object") {
@@ -457,39 +394,23 @@ function freezeRecord(a) {
   });
 }
 
+const OUTCOME_TO_CLASSIFICATION = Object.freeze({
+  [CODEX_OUTCOMES.NOT_INSTALLED]: "NOT_INSTALLED",
+  [CODEX_OUTCOMES.TIMEOUT]: "TIMEOUT",
+  [CODEX_OUTCOMES.AUTH]: "AUTH",
+  [CODEX_OUTCOMES.USAGE_LIMIT]: "USAGE_LIMIT",
+  [CODEX_OUTCOMES.INTERACTIVE]: "INTERACTIVE",
+  [CODEX_OUTCOMES.CRASH]: "CRASH"
+});
+
 function runCodexSpawn({ spawn, argv, projectPath, env, timeoutMs }) {
-  const safeEnvironment = { LANG: SAFE_ENVIRONMENT.LANG, PATH: env.PATH ?? env.Path ?? env.path ?? "" };
-  let result, spawnError = null;
-  try {
-    result = spawn("codex", [...argv], {
-      encoding: "utf8", timeout: timeoutMs, killSignal: "SIGTERM",
-      shell: false, env: safeEnvironment, cwd: projectPath, input: ""
-    });
-  } catch (error) {
-    spawnError = error;
-    result = { status: null, stdout: "", stderr: "", error };
-  }
-  const stdout = redactPreflightText(result.stdout ?? "");
-  const stderr = redactPreflightText(result.stderr ?? "");
-  const errorCode = spawnError?.code ?? result.error?.code ?? null;
-  const timedOut = result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM" || result.signal === "SIGKILL";
-  const exitCode = typeof result.status === "number" ? result.status : null;
-  const combined = `${stdout}${stderr}`;
-  return Object.freeze({
-    spawnError, errorCode, timedOut, exitCode,
-    stdout, stderr, combined,
-    markerInOutput: combined.includes(STEP_6M_MARKER)
-  });
+  return runReadonlyCodex({ argv, projectPath, env, timeoutMs, spawn, marker: STEP_6M_MARKER });
 }
 
 function classifyCodex(codexResult) {
-  if (codexResult.spawnError !== null || codexResult.errorCode === "ENOENT" || codexResult.errorCode === "EACCES") return CLASSIFICATIONS.NOT_INSTALLED;
-  if (codexResult.timedOut) return CLASSIFICATIONS.TIMEOUT;
-  if (AUTH_REQUIRED_PATTERNS.some((rx) => rx.test(codexResult.combined))) return CLASSIFICATIONS.AUTH;
-  if (USAGE_LIMIT_PATTERNS.some((rx) => rx.test(codexResult.combined))) return CLASSIFICATIONS.USAGE_LIMIT;
-  if (INTERACTIVE_PATTERNS.some((rx) => rx.test(codexResult.combined))) return CLASSIFICATIONS.INTERACTIVE;
-  if (typeof codexResult.exitCode !== "number" || codexResult.exitCode !== 0) return CLASSIFICATIONS.CRASH;
-  return null;
+  const outcome = classifyCodexOutcome(codexResult);
+  if (outcome === null) return null;
+  return CLASSIFICATIONS[OUTCOME_TO_CLASSIFICATION[outcome]];
 }
 
 function blockedRecordBase(context) {
@@ -521,7 +442,7 @@ export function runActivationProviderBrainReadonlyHandoff(request) {
   const projectId = request.projectId;
   const allowedRoot = path.resolve(request.allowedRoot);
   const now = typeof request.now === "function" ? request.now : defaultNow;
-  const spawn = typeof request.spawn === "function" ? request.spawn : defaultSpawn;
+  const spawn = typeof request.spawn === "function" ? request.spawn : undefined;
   const env = request.env ?? process.env;
   const timeoutMs = Number.isSafeInteger(request.timeoutMs) && request.timeoutMs > 0 ? request.timeoutMs : STEP_6M_TIMEOUT_MS;
   const providerName = request.provider ?? STEP_6M_PROVIDER;
@@ -631,7 +552,7 @@ export function runActivationProviderBrainReadonlyHandoff(request) {
   }
   const snapshotS1 = snapshotAll(projectPath);
   const decisionChanged = diffSnapshots(snapshotS0, snapshotS1);
-  const decisionForbidden = decisionChanged.filter((entry) => entry !== STEP_6M_DECISION_RELATIVE);
+  const decisionForbidden = disallowedChanges(decisionChanged, [STEP_6M_DECISION_RELATIVE]);
   if (decisionForbidden.length > 0) {
     return freezeRecord({
       classification: CLASSIFICATIONS.FORBIDDEN_MUTATION,
@@ -651,7 +572,7 @@ export function runActivationProviderBrainReadonlyHandoff(request) {
       decisionHash: null, decisionValid: false, decisionWritten: true
     });
   }
-  const decisionHash = createHash("sha256").update(readback).digest("hex");
+  const decisionHash = sha256Hex(readback);
   if (readback !== decisionText) {
     return freezeRecord({
       classification: CLASSIFICATIONS.PROVIDER_DECISION_MISMATCH,
@@ -684,7 +605,7 @@ export function runActivationProviderBrainReadonlyHandoff(request) {
   }
   const snapshotS2 = snapshotAll(projectPath);
   const promptChanged = diffSnapshots(snapshotS1, snapshotS2);
-  const promptForbidden = promptChanged.filter((entry) => entry !== STEP_6M_PROMPT_RELATIVE);
+  const promptForbidden = disallowedChanges(promptChanged, [STEP_6M_PROMPT_RELATIVE]);
   if (promptForbidden.length > 0) {
     return freezeRecord({
       classification: CLASSIFICATIONS.FORBIDDEN_MUTATION,
@@ -704,7 +625,7 @@ export function runActivationProviderBrainReadonlyHandoff(request) {
       promptArtifactWritten: true
     });
   }
-  const promptHash = createHash("sha256").update(promptReadback).digest("hex");
+  const promptHash = sha256Hex(promptReadback);
   if (promptReadback !== expectedPrompt) {
     return freezeRecord({
       classification: CLASSIFICATIONS.PROMPT_MISMATCH,
@@ -796,7 +717,7 @@ export function runActivationProviderBrainReadonlyHandoff(request) {
 
   const snapshotS4 = snapshotAll(projectPath);
   const postCodexChanged = diffSnapshots(snapshotS3, snapshotS4);
-  const postCodexForbidden = postCodexChanged.filter((entry) => !allowedPostCodexPaths.has(entry));
+  const postCodexForbidden = disallowedChanges(postCodexChanged, allowedPostCodexPaths);
   if (postCodexForbidden.length > 0) {
     return freezeRecord({
       classification: CLASSIFICATIONS.FORBIDDEN_MUTATION,
