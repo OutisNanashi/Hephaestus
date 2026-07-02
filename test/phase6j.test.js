@@ -251,13 +251,16 @@ test("cleanup whitelist is the documented public contract (exact files, patterne
     "out/prompts/step-6i-readonly-prompt.md",
     "out/prompts/step-6l-brain-readonly-prompt.md",
     "out/brain_decisions/step-6l-mocked-brain-decision.json",
+    "out/prompts/step-6m-provider-readonly-prompt.md",
+    "out/brain_decisions/step-6m-provider-brain-decision.json",
     "out/summaries/step-6k-readonly-codex-closeout.json"
   ]);
-  assert.equal(CLEANUP_WHITELIST.patternedDirectories.length, 3);
+  assert.equal(CLEANUP_WHITELIST.patternedDirectories.length, 4);
   const patterns = CLEANUP_WHITELIST.patternedDirectories.map((entry) => `${entry.directory}|${entry.pattern}`);
   assert.ok(patterns.some((entry) => entry.startsWith("out/agent_outputs|") && entry.includes("step-6h-readonly-inspect")));
   assert.ok(patterns.some((entry) => entry.startsWith("out/agent_outputs|") && entry.includes("step-6i-readonly-prompt-record")));
   assert.ok(patterns.some((entry) => entry.startsWith("out/agent_outputs|") && entry.includes("step-6l-mocked-brain-readonly-handoff")));
+  assert.ok(patterns.some((entry) => entry.startsWith("out/agent_outputs|") && entry.includes("step-6m-provider-brain-readonly-handoff")));
   assert.deepEqual([...CLEANUP_WHITELIST.emptyDirectories], ["out/prompts", "out/agent_outputs", "out/summaries", "out/brain_decisions", "out"]);
 });
 

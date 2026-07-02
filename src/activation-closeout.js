@@ -140,13 +140,15 @@ function buildSafetyInvariantResults() {
 
   results.push({
     id: "cleanup.whitelist-narrow",
-    ok: CLEANUP_WHITELIST.exactFiles.length === 5
+    ok: CLEANUP_WHITELIST.exactFiles.length === 7
       && CLEANUP_WHITELIST.exactFiles.includes("AGENT_OUTPUT.md")
       && CLEANUP_WHITELIST.exactFiles.includes("out/prompts/step-6i-readonly-prompt.md")
       && CLEANUP_WHITELIST.exactFiles.includes("out/prompts/step-6l-brain-readonly-prompt.md")
+      && CLEANUP_WHITELIST.exactFiles.includes("out/prompts/step-6m-provider-readonly-prompt.md")
       && CLEANUP_WHITELIST.exactFiles.includes("out/brain_decisions/step-6l-mocked-brain-decision.json")
+      && CLEANUP_WHITELIST.exactFiles.includes("out/brain_decisions/step-6m-provider-brain-decision.json")
       && CLEANUP_WHITELIST.exactFiles.includes("out/summaries/step-6k-readonly-codex-closeout.json")
-      && CLEANUP_WHITELIST.patternedDirectories.length === 3
+      && CLEANUP_WHITELIST.patternedDirectories.length === 4
       && CLEANUP_WHITELIST.emptyDirectories.length === 5
   });
 
