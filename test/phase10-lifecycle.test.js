@@ -39,7 +39,7 @@ function entry(id) {
 }
 
 function context() {
-  const directory = writableTemporaryDirectory("hephaestus-phase10b-");
+  const directory = writableTemporaryDirectory("hephaestus-phase10-lifecycle-");
   const root = path.join(directory, "projects");
   makeProject(root, "alpha");
   makeProject(root, "beta");
