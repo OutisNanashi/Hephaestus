@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fail } from "./errors.js";
 import { redactPreflightText, requireAdapter } from "./agent-adapters.js";
+import { resolveSpawnTarget } from "./executable.js";
 
 const PREFLIGHT_TIMEOUT_MS = 5_000;
 const PREFLIGHT_OUTPUT_LIMIT = 200;
@@ -18,7 +19,12 @@ function preflightEnvironment(env) {
 }
 
 function defaultSpawn(executable, args, options) {
-  return spawnSync(executable, args, { ...options, shell: false });
+  // Resolve Windows npm shims (codex.cmd/.exe) so shell:false probing still finds them.
+  const target = resolveSpawnTarget(executable, process.env);
+  if (target === null) {
+    return { status: null, stdout: "", stderr: "", error: Object.assign(new Error(`${executable} not found on PATH`), { code: "ENOENT" }) };
+  }
+  return spawnSync(target.command, [...target.prefixArgs, ...args], { ...options, shell: false });
 }
 
 /** Run a hardcoded harmless availability probe for a known adapter; never sends prompts or runs tasks. */

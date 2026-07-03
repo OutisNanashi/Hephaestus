@@ -39,6 +39,32 @@ test("malformed OpenAI output and missing keys are rejected safely", async () =>
   assert.equal(called, false);
 });
 
+test("a valid decision is accepted on the first attempt without a retry", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; return { ok: true, json: async () => ({ output_text: JSON.stringify(decision) }) }; };
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), decision);
+  assert.equal(calls, 1);
+});
+
+test("fenced JSON decision output is tolerated without weakening validation", async () => {
+  const fenced = async () => ({ ok: true, json: async () => ({ output_text: `\`\`\`json\n${JSON.stringify(decision)}\n\`\`\`` }) });
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl: fenced }), decision);
+});
+
+test("one narrow retry recovers a valid decision after a first non-JSON reply", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; return { ok: true, json: async () => ({ output_text: calls === 1 ? "Sure! Here is the plan (no JSON)." : JSON.stringify(decision) }) }; };
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), decision);
+  assert.equal(calls, 2);
+});
+
+test("malformed model output on both attempts is rejected, never accepted", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; return { ok: true, json: async () => ({ output_text: "not json at all" }) }; };
+  await assert.rejects(() => requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), (error) => code(error, "INVALID_OPENAI_DECISION"));
+  assert.equal(calls, 2);
+});
+
 test("OpenAI provider failures redact secrets and rate limits stay bounded", async () => {
   const secret = `local-secret-${"x".repeat(48)}`;
   await assert.rejects(() => requestOpenAIDecision({ apiKey: "test-key", model: openaiBrain.model, input: "plan", fetchImpl: async () => { throw new Error(`token=${secret}`); } }), (error) => { assert.equal(error.message.includes(secret), false); return code(error, "OPENAI_PROVIDER_FAILED"); });

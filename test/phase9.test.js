@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { run } from "../src/cli.js";
+import { run, runAsync } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 import {
   NotificationDeduper,
@@ -229,6 +229,67 @@ test("notification report writes reject symlink targets without following them",
   } finally {
     fs.rmSync(context.directory, { recursive: true, force: true });
   }
+});
+
+function cliContextWithTelegram() {
+  const context = cliContext();
+  fs.writeFileSync(context.config, `${JSON.stringify({
+    allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs",
+    notifications: { telegram: { enabled: true, botTokenEnv: "TELEGRAM_BOT_TOKEN", chatIdEnv: "TELEGRAM_CHAT_ID" } }
+  })}\n`);
+  return context;
+}
+
+async function withSendEnvironment({ token, chatId }, action) {
+  const originalWrite = process.stdout.write;
+  const originalFetch = globalThis.fetch;
+  const prevToken = process.env.TELEGRAM_BOT_TOKEN;
+  const prevChat = process.env.TELEGRAM_CHAT_ID;
+  const state = { output: "", fetchCalls: 0, lastBody: null };
+  process.stdout.write = (chunk) => { state.output += chunk; return true; };
+  if (token === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = token;
+  if (chatId === undefined) delete process.env.TELEGRAM_CHAT_ID; else process.env.TELEGRAM_CHAT_ID = chatId;
+  globalThis.fetch = async (_url, options) => { state.fetchCalls += 1; state.lastBody = options?.body ?? null; return { ok: true, status: 200, json: async () => ({ ok: true }) }; };
+  try { await action(state); } finally {
+    process.stdout.write = originalWrite;
+    globalThis.fetch = originalFetch;
+    if (prevToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = prevToken;
+    if (prevChat === undefined) delete process.env.TELEGRAM_CHAT_ID; else process.env.TELEGRAM_CHAT_ID = prevChat;
+  }
+}
+
+test("notify send delivers exactly one event via mocked transport, prints no token/chat id, and writes a project-local report", async () => {
+  const context = cliContextWithTelegram();
+  const token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
+  const chatId = "987654321000";
+  try {
+    await withSendEnvironment({ token, chatId }, async (state) => {
+      const exit = await runAsync(["notify", "send", "demo", "--config", context.config, "--fixture", "notification-fixtures/event.json"]);
+      assert.equal(exit, 0);
+      const parsed = JSON.parse(state.output);
+      assert.equal(parsed.mode, "send");
+      assert.equal(parsed.status, "sent");
+      assert.equal(state.fetchCalls, 1); // exactly one send, no spam
+      assert.equal(state.output.includes(token), false); // bot token never printed
+      assert.equal(state.output.includes(chatId), false); // chat id never printed
+      assert.ok(parsed.reportPath.includes(path.join("out", "notification_reports")));
+      const report = fs.readFileSync(parsed.reportPath, "utf8");
+      assert.equal(report.includes(token), false);
+      assert.equal(JSON.parse(report).status, "sent");
+    });
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("notify send fails safely and calls no transport when Telegram config/env is missing", async () => {
+  const context = cliContext(); // no notifications block
+  try {
+    await withSendEnvironment({ token: undefined, chatId: undefined }, async (state) => {
+      const exit = await runAsync(["notify", "send", "demo", "--config", context.config, "--fixture", "notification-fixtures/event.json"]);
+      assert.equal(exit, 1); // skipped -> non-zero, safe
+      assert.equal(JSON.parse(state.output).status, "skipped");
+      assert.equal(state.fetchCalls, 0); // no network attempt
+    });
+  } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
 test("notify render CLI is fixture-only and cannot send a Telegram message", () => {

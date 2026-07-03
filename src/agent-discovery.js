@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { redactPreflightText } from "./agent-adapters.js";
 import { fail } from "./errors.js";
+import { resolveSpawnTarget } from "./executable.js";
 
 const DISCOVERY_TIMEOUT_MS = 5_000;
 const OUTPUT_SUMMARY_LIMIT = 240;
@@ -53,7 +54,12 @@ const INSTALL_PROBLEM_PATTERNS = [
 ];
 
 function defaultSpawn(executable, args, options) {
-  return spawnSync(executable, args, { ...options, shell: false });
+  // Resolve Windows npm shims (codex.cmd/.exe) so shell:false discovery still finds them.
+  const target = resolveSpawnTarget(executable, process.env);
+  if (target === null) {
+    return { status: null, stdout: "", stderr: "", error: Object.assign(new Error(`${executable} not found on PATH`), { code: "ENOENT" }) };
+  }
+  return spawnSync(target.command, [...target.prefixArgs, ...args], { ...options, shell: false });
 }
 
 function discoveryEnvironment(env) {
