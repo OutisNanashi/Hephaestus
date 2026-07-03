@@ -1,0 +1,28 @@
+{
+  "now": "2026-07-02T12:00:00.000Z",
+  "project": "example-project",
+  "phase": "0",
+  "currentBranch": "main",
+  "dirty": false,
+  "retest": { "implementation": true, "review": true },
+  "pr": {
+    "number": 7,
+    "url": "https://fixture.invalid/pr/7",
+    "headBranch": "main",
+    "baseBranch": "master",
+    "status": "OPEN",
+    "mergeable": true,
+    "headCommit": "example-head-0001"
+  },
+  "approval": {
+    "approved": true,
+    "approvedBy": "GPT",
+    "project": "example-project",
+    "phase": "0",
+    "pr": 7,
+    "branch": "main",
+    "headCommit": "example-head-0001",
+    "decidedAt": "2026-07-02T11:00:00.000Z",
+    "stale": false
+  }
+}

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { spawnCliSync, withEmptyPath } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLASSIFICATION_PRIORITY,
@@ -15,7 +15,7 @@ import {
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 
-const CLI_PATH = path.resolve("src/cli.js");
+const CLI_PATH = "src/cli.js";
 
 const validState = Object.freeze({
   currentPhase: "6F", currentTask: "codex-readonly-exec", currentBranch: "main", currentPr: null,
@@ -357,19 +357,21 @@ test("classification priority order is timeout > mutation > auth > usage-limit >
   ]);
 });
 
-test("usage-limit classification exits non-zero through the CLI runner", () => {
+test("usage-limit classification exits non-zero through the CLI runner", { concurrency: false }, () => {
   const context = makeContext();
   try {
     const configPath = path.join(context.directory, "config.json");
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]);
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]));
     } finally { process.stdout.write = originalWrite; }
     const parsed = JSON.parse(stdout);
     assert.notEqual(parsed.classification, CLASSIFICATIONS.PASS);
@@ -497,19 +499,21 @@ test("readonly smoke applies a bounded timeout to the spawn options", () => {
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
-test("CLI agent-codex-readonly-smoke returns nonzero exit when codex is unavailable on PATH", () => {
+test("CLI agent-codex-readonly-smoke returns nonzero exit when codex is unavailable on PATH", { concurrency: false }, () => {
   const context = makeContext();
   try {
     const configPath = path.join(context.directory, "config.json");
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]);
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]));
     } finally { process.stdout.write = originalWrite; }
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.adapterId, "codex");
@@ -525,7 +529,7 @@ test("CLI agent-codex-readonly-smoke returns nonzero exit when codex is unavaila
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
-test("CLI agent-codex-readonly-smoke rejects non-codex adapter selections", () => {
+test("CLI agent-codex-readonly-smoke rejects non-codex adapter selections", { concurrency: false }, () => {
   const context = makeContext();
   try {
     const configPath = path.join(context.directory, "config.json");
@@ -544,7 +548,7 @@ test("CLI agent-codex-readonly-smoke rejects non-codex adapter selections", () =
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
-test("spawned CLI agent-codex-readonly-smoke process exits non-zero when codex is missing", () => {
+test("spawned CLI agent-codex-readonly-smoke process exits non-zero when codex is missing", { concurrency: false }, () => {
   const context = makeContext();
   try {
     const configPath = path.join(context.directory, "config.json");
@@ -554,7 +558,7 @@ test("spawned CLI agent-codex-readonly-smoke process exits non-zero when codex i
     const emptyPathDir = path.join(context.directory, "empty-path");
     fs.mkdirSync(emptyPathDir);
     const env = { ...process.env, PATH: emptyPathDir, Path: emptyPathDir, path: emptyPathDir };
-    const result = spawnSync(process.execPath, [CLI_PATH, "agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"], {
+    const result = spawnCliSync(process.execPath, [CLI_PATH, "agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"], {
       encoding: "utf8",
       shell: false,
       env,

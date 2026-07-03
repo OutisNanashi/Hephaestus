@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { spawnCliSync, withEmptyPath } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLASSIFICATION_PRIORITY,
@@ -15,7 +15,7 @@ import {
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 
-const CLI_PATH = path.resolve("src/cli.js");
+const CLI_PATH = "src/cli.js";
 
 const validState = Object.freeze({
   currentPhase: "6G", currentTask: "codex-readonly-inspect", currentBranch: "main", currentPr: null,
@@ -435,12 +435,14 @@ test("CLI agent-codex-readonly-inspect returns non-zero when codex is unavailabl
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "example-project", path: "example-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["agent-codex-readonly-inspect", "--config", configPath, "--project", "example-project"]);
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-codex-readonly-inspect", "--config", configPath, "--project", "example-project"]));
     } finally { process.stdout.write = originalWrite; }
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.adapter, "codex");
@@ -484,7 +486,7 @@ test("spawned CLI agent-codex-readonly-inspect process exits non-zero when codex
     const emptyPathDir = path.join(context.directory, "empty-path");
     fs.mkdirSync(emptyPathDir);
     const env = { ...process.env, PATH: emptyPathDir, Path: emptyPathDir, path: emptyPathDir };
-    const result = spawnSync(process.execPath, [CLI_PATH, "agent-codex-readonly-inspect", "--config", configPath, "--project", "example-project"], {
+    const result = spawnCliSync(process.execPath, [CLI_PATH, "agent-codex-readonly-inspect", "--config", configPath, "--project", "example-project"], {
       encoding: "utf8",
       shell: false,
       env,

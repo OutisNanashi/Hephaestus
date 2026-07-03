@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { spawnCliSync } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLOSEOUT_REPORT_RELATIVE,
@@ -11,8 +12,8 @@ import {
 import { KNOWN_COMMANDS, run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 
-const CLI_PATH = path.resolve("src/cli.js");
-const REPO_ROOT = path.resolve(".");
+const CLI_PATH = "src/cli.js";
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const REQUIRED_COMMANDS = Object.freeze([
   "agent-codex-readonly-smoke",
@@ -335,7 +336,7 @@ test("spawned CLI activation-closeout-readonly-codex exits 0 on PASS (real proce
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "example-project", path: "example-project" }] });
-    const result = spawnSync(process.execPath, [CLI_PATH, "activation-closeout-readonly-codex", "--config", configPath, "--project", "example-project"], {
+    const result = spawnCliSync(process.execPath, [CLI_PATH, "activation-closeout-readonly-codex", "--config", configPath, "--project", "example-project"], {
       encoding: "utf8",
       shell: false,
       timeout: 60_000
