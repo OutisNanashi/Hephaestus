@@ -30,19 +30,44 @@ function outputText(payload) {
   return parts.length > 0 ? parts.join("\n") : null;
 }
 
+const STRICT_JSON_SUFFIX = "\n\nRespond with ONLY one valid JSON object with exactly these keys: nextAction, rationale, allowedFiles, requiredTests, stopConditions. No markdown, no code fences, no commentary.";
+
+// Tolerate models that wrap JSON in ```json fences or add surrounding prose; validation itself is never relaxed.
+function extractJsonText(raw) {
+  let text = raw.trim();
+  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(text);
+  if (fence) text = fence[1].trim();
+  if (text.startsWith("{") && text.endsWith("}")) return text;
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  return first !== -1 && last > first ? text.slice(first, last + 1) : text;
+}
+
+// Returns a validated decision or null; null means "invalid, worth one stricter retry". Never accepts malformed output.
+function parseDecision(rawText) {
+  if (typeof rawText !== "string" || rawText.trim() === "") return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(extractJsonText(rawText));
+  } catch {
+    return null;
+  }
+  try {
+    return validateOpenAIDecision(parsed);
+  } catch {
+    return null;
+  }
+}
+
 /** Request a JSON-only coding decision; this function never writes project files. */
-export async function requestOpenAIDecision({ apiKey, model, input, fetchImpl = globalThis.fetch, sleepImpl = (delay) => new Promise((resolve) => setTimeout(resolve, delay)) }) {
-  const key = text(apiKey, "OpenAI API key", "OPENAI_API_KEY_MISSING");
-  const selectedModel = text(model, "OpenAI model", "INVALID_OPENAI_CONFIG");
-  const prompt = text(input, "OpenAI input", "INVALID_OPENAI_INPUT");
-  if (typeof fetchImpl !== "function") fail("OpenAI fetch implementation is unavailable.", "OPENAI_PROVIDER_FAILED");
+async function requestOutputText({ key, model, prompt, fetchImpl, sleepImpl }) {
   let response;
   for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     try {
       response = await fetchImpl(OPENAI_RESPONSES_URL, {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-        body: JSON.stringify({ model: selectedModel, input: prompt, max_output_tokens: MAX_OUTPUT_TOKENS })
+        body: JSON.stringify({ model, input: prompt, max_output_tokens: MAX_OUTPUT_TOKENS })
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -53,18 +78,23 @@ export async function requestOpenAIDecision({ apiKey, model, input, fetchImpl = 
   }
   if (response?.status === 429) fail("OpenAI request rate limited after bounded retries.", "OPENAI_RATE_LIMITED");
   if (!response?.ok) fail(`OpenAI request failed with status ${response?.status ?? "unknown"}.`, "OPENAI_PROVIDER_FAILED");
-  let payload;
   try {
-    payload = await response.json();
+    return outputText(await response.json());
   } catch {
     fail("OpenAI response was not valid JSON.", "OPENAI_PROVIDER_FAILED");
   }
-  const output = outputText(payload);
-  if (typeof output !== "string" || output.trim() === "") fail("OpenAI response did not contain text output.", "INVALID_OPENAI_DECISION");
-  try {
-    return validateOpenAIDecision(JSON.parse(output));
-  } catch (error) {
-    if (error?.code) throw error;
-    fail("OpenAI response text was not valid decision JSON.", "INVALID_OPENAI_DECISION");
-  }
+}
+
+export async function requestOpenAIDecision({ apiKey, model, input, fetchImpl = globalThis.fetch, sleepImpl = (delay) => new Promise((resolve) => setTimeout(resolve, delay)) }) {
+  const key = text(apiKey, "OpenAI API key", "OPENAI_API_KEY_MISSING");
+  const selectedModel = text(model, "OpenAI model", "INVALID_OPENAI_CONFIG");
+  const prompt = text(input, "OpenAI input", "INVALID_OPENAI_INPUT");
+  if (typeof fetchImpl !== "function") fail("OpenAI fetch implementation is unavailable.", "OPENAI_PROVIDER_FAILED");
+
+  const first = parseDecision(await requestOutputText({ key, model: selectedModel, prompt, fetchImpl, sleepImpl }));
+  if (first !== null) return first;
+  // One narrow retry with a stricter JSON-only instruction; validation stays strict, malformed output is still rejected.
+  const retry = parseDecision(await requestOutputText({ key, model: selectedModel, prompt: `${prompt}${STRICT_JSON_SUFFIX}`, fetchImpl, sleepImpl }));
+  if (retry !== null) return retry;
+  fail("OpenAI response text was not valid decision JSON.", "INVALID_OPENAI_DECISION");
 }

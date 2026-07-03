@@ -1,5 +1,9 @@
 {
   "allowedRoot": "./fixtures/projects",
   "registryPath": "./projects.json",
-  "logDirectory": "./logs"
+  "logDirectory": "./logs",
+  "brain": { "provider": "openai", "model": "gpt-5.4-mini" },
+  "notifications": {
+    "telegram": { "enabled": true, "botTokenEnv": "TELEGRAM_BOT_TOKEN", "chatIdEnv": "TELEGRAM_CHAT_ID" }
+  }
 }
