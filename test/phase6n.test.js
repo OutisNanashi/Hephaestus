@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import * as pipeline from "../src/readonly-handoff-pipeline.js";
 import * as step6L from "../src/brain-readonly-handoff.js";
 import * as step6M from "../src/brain-provider-readonly-handoff.js";
 import { HephaestusError } from "../src/errors.js";
 
-const HELPER_PATH = path.resolve("src/readonly-handoff-pipeline.js");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HELPER_PATH = path.join(REPO_ROOT, "src/readonly-handoff-pipeline.js");
 const HELPER_SOURCE = fs.readFileSync(HELPER_PATH, "utf8");
 
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
-function temporaryDirectory() { return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-")); }
+function temporaryDirectory() { return fs.mkdtempSync(path.join(REPO_ROOT, "test", "tmp-")); }
 
 // === helper surface — only narrow safety utilities ===
 
@@ -208,7 +210,7 @@ test("Step 6M public surface unchanged after refactor", () => {
 
 test("Step 6L and Step 6M each use the shared helper (import shows up in the source)", () => {
   for (const relative of ["src/brain-readonly-handoff.js", "src/brain-provider-readonly-handoff.js"]) {
-    const src = fs.readFileSync(path.resolve(relative), "utf8");
+    const src = fs.readFileSync(path.join(REPO_ROOT, relative), "utf8");
     assert.match(src, /from "\.\/readonly-handoff-pipeline\.js"/u, `${relative} must import from readonly-handoff-pipeline`);
   }
 });

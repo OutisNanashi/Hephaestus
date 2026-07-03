@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { spawnCliSync } from "./helpers/spawned-cli.js";
+import { spawnCliSync, withEmptyPath } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLASSIFICATION_PRIORITY,
@@ -507,12 +507,14 @@ test("CLI agent-codex-readonly-prompt-record returns non-zero when codex is unav
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "example-project", path: "example-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["agent-codex-readonly-prompt-record", "--config", configPath, "--project", "example-project"]);
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-codex-readonly-prompt-record", "--config", configPath, "--project", "example-project"]));
     } finally { process.stdout.write = originalWrite; }
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.adapter, "codex");

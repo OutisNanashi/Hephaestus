@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { spawnCliSync } from "./helpers/spawned-cli.js";
+import { spawnCliSync, withEmptyPath } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   CLASSIFICATION_PRIORITY,
@@ -364,12 +364,14 @@ test("usage-limit classification exits non-zero through the CLI runner", { concu
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]);
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]));
     } finally { process.stdout.write = originalWrite; }
     const parsed = JSON.parse(stdout);
     assert.notEqual(parsed.classification, CLASSIFICATIONS.PASS);
@@ -504,12 +506,14 @@ test("CLI agent-codex-readonly-smoke returns nonzero exit when codex is unavaila
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]);
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-codex-readonly-smoke", "--config", configPath, "--project", "demo-project"]));
     } finally { process.stdout.write = originalWrite; }
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.adapterId, "codex");

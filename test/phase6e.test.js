@@ -3,13 +3,16 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { withEmptyPath } from "./helpers/spawned-cli.js";
 import { runAgentTask } from "../src/agent.js";
 import { CLASSIFICATIONS, detectHelpEvidence, runCodexDiscovery } from "../src/agent-discovery.js";
 import { runCodexSmoke } from "../src/agent-smoke.js";
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 
-const CLI_PATH = path.resolve("src/cli.js");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const CLI_PATH = path.join(REPO_ROOT, "src/cli.js");
 
 function temporaryDirectory() { return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-")); }
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
@@ -220,13 +223,19 @@ test("discovery never mutates project files in the working directory and never s
 });
 
 test("CLI agent-discover emits classification JSON and exits non-zero when codex is not installed", () => {
+  const directory = temporaryDirectory();
   let stdout = "";
   const originalWrite = process.stdout.write;
   let exitCode;
   try {
+    const emptyPathDir = path.join(directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     process.stdout.write = (chunk) => { stdout += chunk; return true; };
-    exitCode = runCli(["agent-discover", "--adapter", "codex"]);
-  } finally { process.stdout.write = originalWrite; }
+    exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-discover", "--adapter", "codex"]));
+  } finally {
+    process.stdout.write = originalWrite;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
   const parsed = JSON.parse(stdout);
   assert.equal(parsed.classification, CLASSIFICATIONS.NOT_INSTALLED);
   assert.equal(parsed.codexOnPath, false);

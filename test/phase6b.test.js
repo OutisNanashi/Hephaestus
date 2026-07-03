@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { withEmptyPath } from "./helpers/spawned-cli.js";
 import { runAgentTask } from "../src/agent.js";
 import { ADAPTER_IDS, getAdapter, listAdapters, redactPreflightText, requireAdapter } from "../src/agent-adapters.js";
 import { runAgentPreflight } from "../src/agent-preflight.js";
@@ -183,18 +184,24 @@ test("config validates the optional adapters block and rejects unsupported keys 
 });
 
 test("CLI agent-preflight reports JSON without sending a prompt and exits non-zero when unavailable", () => {
+  const directory = temporaryDirectory();
   let stdout = "";
   const originalWrite = process.stdout.write;
   try {
+    const emptyPathDir = path.join(directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     process.stdout.write = (chunk) => { stdout += chunk; return true; };
-    const exitCode = runCli(["agent-preflight", "--adapter", "codex"]);
+    const exitCode = withEmptyPath(emptyPathDir, () => runCli(["agent-preflight", "--adapter", "codex"]));
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.adapterId, "codex");
     assert.equal(parsed.executionAllowed, false);
     assert.equal(parsed.promptSent, false);
     assert.equal(parsed.mutatedProjectFiles, false);
     assert.notEqual(exitCode, 0);
-  } finally { process.stdout.write = originalWrite; }
+  } finally {
+    process.stdout.write = originalWrite;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("CLI agent-preflight rejects unknown adapter ids before doing any work", () => {

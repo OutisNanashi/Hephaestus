@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { spawnCliSync } from "./helpers/spawned-cli.js";
+import { spawnCliSync, withEmptyPath } from "./helpers/spawned-cli.js";
 import {
   CLASSIFICATIONS,
   STEP_6L_AGENT_OUTPUT_RELATIVE,
@@ -525,13 +525,17 @@ test("CLI activation-mocked-brain-readonly-handoff returns non-zero when codex i
     const registryPath = path.join(context.directory, "projects.json");
     writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
     writeJson(registryPath, { projects: [{ id: "example-project", path: "example-project" }] });
+    const emptyPathDir = path.join(context.directory, "empty-path");
+    fs.mkdirSync(emptyPathDir);
     let stdout = "";
     const originalWrite = process.stdout.write;
     let exitCode;
     try {
       process.stdout.write = (chunk) => { stdout += chunk; return true; };
-      exitCode = runCli(["activation-mocked-brain-readonly-handoff", "--config", configPath, "--project", "example-project"]);
-    } finally { process.stdout.write = originalWrite; }
+      exitCode = withEmptyPath(emptyPathDir, () => runCli(["activation-mocked-brain-readonly-handoff", "--config", configPath, "--project", "example-project"]));
+    } finally {
+      process.stdout.write = originalWrite;
+    }
     const parsed = JSON.parse(stdout);
     assert.equal(parsed.adapter, "codex");
     assert.equal(parsed.mode, "mocked-brain-readonly-exec");
