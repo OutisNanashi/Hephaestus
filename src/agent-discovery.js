@@ -47,6 +47,10 @@ const AUTH_REQUIRED_PATTERNS = [
   /authentication\s+required/iu,
   /run\s+`?codex\s+login`?/iu
 ];
+const INSTALL_PROBLEM_PATTERNS = [
+  /missing optional dependency .*@openai\/codex/iu,
+  /reinstall codex/iu
+];
 
 function defaultSpawn(executable, args, options) {
   return spawnSync(executable, args, { ...options, shell: false });
@@ -121,6 +125,9 @@ function classify({ versionResult, helpResult, evidence }) {
       (helpResult.errorCode === "ENOENT" || helpResult.errorCode === "EACCES")) {
     return CLASSIFICATIONS.NOT_INSTALLED;
   }
+  if (INSTALL_PROBLEM_PATTERNS.some((rx) => rx.test(`${versionResult.stdout}\n${versionResult.stderr}\n${helpResult.stdout}\n${helpResult.stderr}`))) {
+    return CLASSIFICATIONS.NOT_INSTALLED;
+  }
   if (!versionResult.captured && !helpResult.captured) {
     return CLASSIFICATIONS.DISCOVERY_FAILED;
   }
@@ -187,7 +194,9 @@ export function runCodexDiscovery(request = {}) {
   const classification = classify({ versionResult, helpResult, evidence });
   const finishedAt = now();
 
-  const codexOnPath = versionResult.errorCode !== "ENOENT" && versionResult.errorCode !== "EACCES";
+  const codexOnPath = classification !== CLASSIFICATIONS.NOT_INSTALLED
+    && versionResult.errorCode !== "ENOENT"
+    && versionResult.errorCode !== "EACCES";
   const versionText = versionResult.captured ? versionResult.summary : null;
 
   return Object.freeze({

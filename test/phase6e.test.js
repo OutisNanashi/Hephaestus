@@ -69,6 +69,17 @@ test("missing codex on PATH classifies as STEP_6E_BLOCKED_CODEX_NOT_INSTALLED", 
   assert.match(report.manualAction, /Install the Codex CLI/u);
 });
 
+test("broken codex install that asks for reinstall classifies as STEP_6E_BLOCKED_CODEX_NOT_INSTALLED", () => {
+  const stderr = "Error: Missing optional dependency @openai/codex-linux-x64. Reinstall Codex: npm install -g @openai/codex@latest\n";
+  const spawn = fakeSpawn({
+    version: () => ({ status: 1, stdout: "", stderr }),
+    help: () => ({ status: 1, stdout: "", stderr })
+  });
+  const report = runCodexDiscovery({ env: { PATH: "/usr/bin" }, spawn });
+  assert.equal(report.classification, CLASSIFICATIONS.NOT_INSTALLED);
+  assert.equal(report.codexOnPath, false);
+});
+
 test("discovery uses only hardcoded codex executable, hardcoded argv, and shell:false", () => {
   const spawn = fakeSpawn({ version: okVersion(), help: okHelp(PASS_HELP_TEXT) });
   runCodexDiscovery({ env: { PATH: "/usr/bin" }, spawn });

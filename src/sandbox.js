@@ -12,6 +12,7 @@ const SAFE_CONTAINER_ENVIRONMENT = Object.freeze({ LANG: "C.UTF-8" });
 const COMMAND_TIMEOUT_MS = 1_000;
 const DOCKER_LIFECYCLE_TIMEOUT_MS = 5_000;
 const NPM_TEST_TIMEOUT_MS = 15_000;
+const WSL_DOCKER_STUB = /could not be found in this WSL 2 distro|activate the WSL integration/iu;
 
 const ALLOWLIST = Object.freeze({
   "test-echo": Object.freeze({ script: "printf 'sandbox-ok\\n'" }),
@@ -33,22 +34,50 @@ function dockerEnvironment() {
   return { PATH: process.env.PATH };
 }
 
-function dockerResult(args, timeout = DOCKER_LIFECYCLE_TIMEOUT_MS) {
-  const result = spawnSync("docker", args, {
+function windowsMountPath(hostPath) {
+  const match = /^\/mnt\/([a-z])\/(.+)$/iu.exec(hostPath);
+  return match ? `${match[1].toUpperCase()}:/${match[2]}` : hostPath;
+}
+
+function dockerDesktopArgs(args) {
+  return args.map((arg, index) => {
+    if (args[index - 1] !== "--mount") return arg;
+    return arg.replace(/(^|,)src=([^,]+)/u, (part, prefix, source) => `${prefix}src=${windowsMountPath(source)}`);
+  });
+}
+
+function spawnDocker(executable, args, timeout) {
+  const result = spawnSync(executable, args, {
     encoding: "utf8",
     timeout,
     killSignal: "SIGTERM",
     env: dockerEnvironment()
   });
   const timedOut = result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM" || result.signal === "SIGKILL";
-  if (result.error && !timedOut) {
-    fail(`Docker sandbox command could not start: ${result.error.message}`, "SANDBOX_RUNTIME_FAILED");
-  }
-  return Object.freeze({
+  return {
+    error: result.error ?? null,
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
     exitCode: result.status ?? null,
     timedOut
+  };
+}
+
+function shouldRetryWithDockerDesktop(result) {
+  return result.error?.code === "ENOENT" || result.error?.code === "EACCES" || WSL_DOCKER_STUB.test(result.stderr);
+}
+
+function dockerResult(args, timeout = DOCKER_LIFECYCLE_TIMEOUT_MS) {
+  let result = spawnDocker("docker", args, timeout);
+  if (shouldRetryWithDockerDesktop(result)) result = spawnDocker("docker.exe", dockerDesktopArgs(args), timeout);
+  if (result.error && !result.timedOut) {
+    fail(`Docker sandbox command could not start: ${result.error.message}`, "SANDBOX_RUNTIME_FAILED");
+  }
+  return Object.freeze({
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+    timedOut: result.timedOut
   });
 }
 
