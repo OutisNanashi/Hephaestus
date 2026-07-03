@@ -114,6 +114,9 @@ test("project state, log, prompt, test, and review resources never cross project
 
 test("global status is deterministic, lists every project, and never writes files or starts work", () => {
   const c = context({ alpha: { ...baseState, usageLimitPaused: true, nextAction: "agent-usage-limit-paused" } });
+  let fetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => { fetchCalled = true; throw new Error("status must not contact external services"); };
   try {
     const before = fs.readdirSync(c.root, { recursive: true }).sort();
     const output = capture(() => assert.equal(run(["status", "--config", c.config]), 0));
@@ -123,6 +126,19 @@ test("global status is deterministic, lists every project, and never writes file
     assert.deepEqual(globalProjectStatus(loadMultiProjectRegistry(c.registry, c.root)), result.projects);
     assert.deepEqual(fs.readdirSync(c.root, { recursive: true }).sort(), before);
     assert.equal(fs.existsSync(path.join(c.root, "alpha", "out")), false);
+    assert.equal(fs.existsSync(path.join(c.root, "alpha", "AGENT_OUTPUT.md")), false);
+    assert.equal(fetchCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(c.directory, { recursive: true, force: true });
+  }
+});
+
+test("global status fails safely when a registered project path is missing", () => {
+  const c = context();
+  try {
+    fs.rmSync(path.join(c.root, "beta"), { recursive: true, force: true });
+    assert.throws(() => run(["status", "--config", c.config]), (error) => code(error, "PATH_RESOLUTION_FAILED"));
   } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
 
