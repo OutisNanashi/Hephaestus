@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { run } from "../src/cli.js";
 import { loadDashboardStatus } from "../src/dashboard.js";
+import { projectFingerprint } from "../src/test-gate.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
 const baseState = Object.freeze({
@@ -137,6 +138,73 @@ test("dashboard help uses readable lines rather than literal newline text", () =
   assert.equal(help.includes("starting work.\n  dashboard     Render a read-only"), true);
   assert.equal(help.includes("\\n  hephaestus dashboard"), false);
   assert.equal(help.includes("\\n  dashboard     Render"), false);
+});
+
+function writeTestEvidence(projectDirectory, { pass = true } = {}) {
+  const declaration = { requiredCommands: [{ id: "npm test", outputRequired: false }], watchedFiles: ["PLAN.md"] };
+  writeJson(path.join(projectDirectory, "TESTS.json"), declaration);
+  fs.mkdirSync(path.join(projectDirectory, "out", "test_reports"), { recursive: true });
+  writeJson(path.join(projectDirectory, "out", "test_reports", "evidence.json"), {
+    projectFingerprint: projectFingerprint(projectDirectory, declaration),
+    commands: [{ id: "npm test", exitCode: pass ? 0 : 1, stdout: "ok", stderr: "" }]
+  });
+}
+
+function writeNotificationReport(projectDirectory, event) {
+  const directory = path.join(projectDirectory, "out", "notification_reports");
+  fs.mkdirSync(directory, { recursive: true });
+  writeJson(path.join(directory, "latest.json"), { status: "skipped", event });
+}
+
+test("dashboard shows test status from saved evidence and unknown when absent", () => {
+  const c = context();
+  try {
+    assert.equal(loadDashboardStatus(c.registry, c.root).find((row) => row.id === "running").testStatus, "unknown");
+    writeTestEvidence(path.join(c.root, "running"), { pass: true });
+    writeTestEvidence(path.join(c.root, "blocked"), { pass: false });
+    const rows = loadDashboardStatus(c.registry, c.root);
+    assert.equal(rows.find((row) => row.id === "running").testStatus, "passed");
+    assert.equal(rows.find((row) => row.id === "blocked").testStatus, "blocked");
+    assert.equal(rows.find((row) => row.id === "merged").testStatus, "unknown");
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
+});
+
+test("dashboard shows the latest notification when present, redacts it, and is null when absent", () => {
+  const c = context();
+  const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890ABCDE";
+  try {
+    assert.equal(loadDashboardStatus(c.registry, c.root).find((row) => row.id === "running").latestNotification, null);
+    writeNotificationReport(path.join(c.root, "running"), { type: "manual_blocker", reason: `needs github_token=${secret}` });
+    const row = loadDashboardStatus(c.registry, c.root).find((item) => item.id === "running");
+    assert.match(row.latestNotification, /manual_blocker/u);
+    assert.equal(row.latestNotification.includes(secret), false);
+    assert.match(row.latestNotification, /\[REDACTED\]/u);
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
+});
+
+test("dashboard tolerates malformed optional test and notification reports without crashing", () => {
+  const c = context();
+  try {
+    fs.mkdirSync(path.join(c.root, "running", "out", "test_reports"), { recursive: true });
+    fs.writeFileSync(path.join(c.root, "running", "out", "test_reports", "evidence.json"), "{ bad json\n");
+    fs.mkdirSync(path.join(c.root, "running", "out", "notification_reports"), { recursive: true });
+    fs.writeFileSync(path.join(c.root, "running", "out", "notification_reports", "latest.json"), "{ bad json\n");
+    const row = loadDashboardStatus(c.registry, c.root).find((item) => item.id === "running");
+    assert.equal(row.testStatus, "unknown");
+    assert.equal(row.latestNotification, null);
+    assert.equal(row.status, "running");
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
+});
+
+test("dashboard render creates no root BUILD_LOG.md or STATE.json and conductor commands work without it", () => {
+  const c = context();
+  try {
+    capture(() => assert.equal(run(["dashboard", "--config", c.config]), 0));
+    for (const stray of ["BUILD_LOG.md", "STATE.json"]) assert.equal(fs.existsSync(path.join(c.directory, stray)), false);
+    // Terminal conductor stays the source of truth: status/pause work without the dashboard ever being invoked.
+    capture(() => assert.equal(run(["status", "--config", c.config]), 0));
+    capture(() => assert.equal(run(["pause", "--project", "running", "--config", c.config]), 0));
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
 });
 
 test("dashboard redacts obvious secrets and has deterministic output", () => {

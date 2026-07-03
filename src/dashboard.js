@@ -1,8 +1,10 @@
 import fs from "node:fs";
+import path from "node:path";
 import { HephaestusError } from "./errors.js";
 import { loadMultiProjectRegistry, projectResource, projectStatus, readProjectState } from "./multi-project.js";
 import { redactSecrets } from "./notification.js";
 import { assertRealPathWithinRoot } from "./safe-path.js";
+import { verifyTestEvidence } from "./test-gate.js";
 
 const UNKNOWN = "unknown";
 
@@ -12,6 +14,34 @@ function displayText(value, fallback = null) {
 
 function errorCode(error) {
   return error instanceof HephaestusError ? error.code : "DASHBOARD_STATE_UNAVAILABLE";
+}
+
+// Read-only: reuse the existing evidence verifier; absence or malformed evidence reads as "unknown".
+function testStatus(project) {
+  try {
+    return verifyTestEvidence(project.path).status;
+  } catch {
+    return UNKNOWN;
+  }
+}
+
+// Read-only: surface the newest saved notification report (already redacted on save) without creating anything.
+function latestNotification(project) {
+  try {
+    const root = assertRealPathWithinRoot(project.path, project.path);
+    const directory = assertRealPathWithinRoot(root, path.join(root, "out", "notification_reports"));
+    const files = fs.readdirSync(directory)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => ({ file: path.join(directory, name), mtime: fs.statSync(path.join(directory, name)).mtimeMs, name }))
+      .sort((left, right) => right.mtime - left.mtime || right.name.localeCompare(left.name));
+    if (files.length === 0) return null;
+    const report = JSON.parse(fs.readFileSync(files[0].file, "utf8"));
+    const event = report?.event ?? {};
+    const summary = `${event.type ?? "notification"}: ${event.reason ?? ""}`.trim();
+    return redactSecrets(summary.slice(0, 240));
+  } catch {
+    return null;
+  }
 }
 
 function latestLogSummary(project) {
@@ -36,12 +66,12 @@ function unavailableRow(project, stateError) {
     currentTask: null,
     assignedAgent: displayText(project.assignedAgent, "unassigned"),
     containerStatus: UNKNOWN,
-    testStatus: UNKNOWN,
+    testStatus: testStatus(project),
     reviewStatus: UNKNOWN,
     mergeStatus: UNKNOWN,
     blocked: false,
     manualAction: null,
-    latestNotification: null,
+    latestNotification: latestNotification(project),
     latestLogSummary: latestLogSummary(project),
     stateAvailable: false,
     stateError
@@ -60,12 +90,12 @@ function dashboardRow(project) {
       currentTask: displayText(state.currentTask),
       assignedAgent: displayText(state.assignedAgent, displayText(project.assignedAgent, "unassigned")),
       containerStatus: displayText(state.containerStatus, UNKNOWN),
-      testStatus: UNKNOWN,
+      testStatus: testStatus(project),
       reviewStatus: displayText(state.reviewStatus, UNKNOWN),
       mergeStatus: displayText(state.mergeStatus, UNKNOWN),
       blocked: state.blocked,
       manualAction: state.blocked ? displayText(state.nextAction, "manual action required") : null,
-      latestNotification: null,
+      latestNotification: latestNotification(project),
       latestLogSummary: latestLogSummary(project),
       stateAvailable: true,
       stateError: null
