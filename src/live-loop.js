@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { runCodexWorkspaceExec, WORKSPACE_CLASSIFICATIONS } from "./agent-codex-workspace-exec.js";
 import { fail } from "./errors.js";
@@ -32,6 +33,11 @@ function notificationEventFor({ status, projectId, phase, reason, requiredAction
 /** Notification failures must never stop the loop; the result is recorded either way. */
 async function notify({ transport, deduper, projectPath, event }) {
   try {
+    // Persistent dedup across invocations (e.g. a VPS timer re-running a blocked
+    // project): an existing report for this dedupe key means it was already sent.
+    if (fs.existsSync(path.join(projectPath, "out", "notification_reports", `${event.dedupeKey}.json`))) {
+      return "skipped";
+    }
     const result = await dispatchNotification({ event, transport, deduper });
     saveNotificationReport(projectPath, result);
     return result.status;
