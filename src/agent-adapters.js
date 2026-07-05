@@ -1,6 +1,6 @@
 import { fail } from "./errors.js";
 
-const REAL_AGENT_REASON = "Real coding-agent execution is disabled in Step 6B; only fixture adapters may run.";
+const REAL_AGENT_REASON = "Real coding agents do not run through the generic fixture sandbox path; Codex runs via the dedicated workspace exec module.";
 
 const ADAPTERS = Object.freeze({
   "fixture-agent": Object.freeze({
