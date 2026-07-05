@@ -1,0 +1,12 @@
+[Unit]
+Description=Hephaestus live loop for project %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/hephaestus
+EnvironmentFile=/opt/hephaestus/.env
+ExecStart=/usr/bin/node src/cli.js run-live --project %i --max-cycles 5 --config hephaestus.vps.config.json
+# run-live exits non-zero on blocked/paused/max-cycles; that is normal, not a crash.
+SuccessExitStatus=0 1

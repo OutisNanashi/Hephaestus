@@ -204,6 +204,32 @@ test("terminal loop events send a Telegram notification when configured", async 
   } finally { cleanup(context); }
 });
 
+test("a terminal event already notified in a previous invocation is not re-sent", async () => {
+  const context = makeProject();
+  const telegramCalls = [];
+  const fetchImpl = async (url, options) => {
+    if (typeof url === "string" && url.includes("api.telegram.org")) {
+      telegramCalls.push(options.body);
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ok: true }) };
+    }
+    return {
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({ output_text: JSON.stringify(decision({ loopSignal: "task-complete", rationale: "All done." })) })
+    };
+  };
+  const request = loopRequest(context, {
+    fetchImpl,
+    env: { OPENAI_API_KEY: "test-key", TG_TOKEN: "12345:abc", TG_CHAT: "42" },
+    telegram: { enabled: true, botTokenEnv: "TG_TOKEN", chatIdEnv: "TG_CHAT" }
+  });
+  try {
+    assert.equal((await runLiveLoop(request)).notification, "sent");
+    // Second invocation (e.g. a scheduler re-run) reaches the same terminal event.
+    assert.equal((await runLiveLoop(request)).notification, "skipped");
+    assert.equal(telegramCalls.length, 1);
+  } finally { cleanup(context); }
+});
+
 test("notification failure never crashes the loop", async () => {
   const context = makeProject();
   const fetchImpl = async (url, options) => {
