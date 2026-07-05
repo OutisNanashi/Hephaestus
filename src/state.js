@@ -5,25 +5,11 @@ import { assertRealPathWithinRoot } from "./safe-path.js";
 
 const REQUIRED_STATE_KEYS = [
   "currentPhase", "currentTask", "currentBranch", "currentPr", "assignedAgent",
-  "attemptCount", "blocked", "usageLimitPaused", "lastSuccessfulStep", "reviewStatus",
+  "attemptCount", "blocked", "usageLimitPaused", "lastSuccessfulStep",
   "mergeStatus", "containerStatus", "lastGptDecision", "nextAction"
 ];
-const OPTIONAL_STATE_KEYS = new Set(["review", "mergeGate", "agent"]);
+const OPTIONAL_STATE_KEYS = new Set(["mergeGate", "agent"]);
 const STRING_OR_NULL_KEYS = new Set(["currentPr", "assignedAgent", "lastSuccessfulStep", "lastGptDecision"]);
-
-function validateReviewDetails(review) {
-  const keys = ["attempted", "ingestionStatus", "unresolvedBlockers", "dismissedCount", "resolvedCount", "activeSources", "unavailableSources", "mergeBlocked", "ingestedAt", "failureReason"];
-  if (review === null || Array.isArray(review) || typeof review !== "object") fail("STATE.json review must be an object.", "INVALID_STATE");
-  if (keys.some((key) => !(key in review)) || Object.keys(review).some((key) => !keys.includes(key))) fail("STATE.json review has an invalid schema.", "INVALID_STATE");
-  if (typeof review.attempted !== "boolean" || typeof review.mergeBlocked !== "boolean") fail("STATE.json review flags must be booleans.", "INVALID_STATE");
-  if (!["succeeded", "failed"].includes(review.ingestionStatus)) fail("STATE.json review ingestionStatus is invalid.", "INVALID_STATE");
-  for (const key of ["unresolvedBlockers", "dismissedCount", "resolvedCount"]) if (!Number.isSafeInteger(review[key]) || review[key] < 0) fail(`STATE.json review ${key} must be a non-negative integer.`, "INVALID_STATE");
-  for (const key of ["activeSources", "unavailableSources"]) {
-    if (!Array.isArray(review[key]) || review[key].some((value) => typeof value !== "string" || value.trim() === "") || new Set(review[key]).size !== review[key].length) fail(`STATE.json review ${key} must be a unique string array.`, "INVALID_STATE");
-  }
-  for (const key of ["ingestedAt", "failureReason"]) if (review[key] !== null && (typeof review[key] !== "string" || review[key].trim() === "")) fail(`STATE.json review ${key} must be a string or null.`, "INVALID_STATE");
-  return Object.freeze({ ...review, activeSources: Object.freeze([...review.activeSources]), unavailableSources: Object.freeze([...review.unavailableSources]) });
-}
 
 function validateMergeResult(result) {
   if (result === null) return null;
@@ -34,10 +20,10 @@ function validateMergeResult(result) {
 }
 
 function validateMergeGateDetails(mergeGate) {
-  const keys = ["readiness", "implementationRetested", "reviewRetested", "nextPhaseEligible", "mergeResult"];
+  const keys = ["readiness", "implementationRetested", "nextPhaseEligible", "mergeResult"];
   if (!mergeGate || Array.isArray(mergeGate) || typeof mergeGate !== "object" || keys.some((key) => !(key in mergeGate)) || Object.keys(mergeGate).some((key) => !keys.includes(key))) fail("STATE.json mergeGate has an invalid schema.", "INVALID_STATE");
   if (!new Set(["not-run", "blocked", "allowed", "merged"]).has(mergeGate.readiness)) fail("STATE.json mergeGate readiness is invalid.", "INVALID_STATE");
-  for (const key of ["implementationRetested", "reviewRetested", "nextPhaseEligible"]) if (typeof mergeGate[key] !== "boolean") fail(`STATE.json mergeGate ${key} must be a boolean.`, "INVALID_STATE");
+  for (const key of ["implementationRetested", "nextPhaseEligible"]) if (typeof mergeGate[key] !== "boolean") fail(`STATE.json mergeGate ${key} must be a boolean.`, "INVALID_STATE");
   const mergeResult = validateMergeResult(mergeGate.mergeResult);
   if (mergeGate.nextPhaseEligible !== (mergeResult !== null)) fail("STATE.json mergeGate nextPhaseEligible must match merge result presence.", "INVALID_STATE");
   if (mergeGate.readiness === "merged" && mergeResult === null) fail("STATE.json mergeGate merged readiness requires a merge result.", "INVALID_STATE");
@@ -88,10 +74,9 @@ export function validateState(state) {
       fail(`STATE.json ${key} must be a non-empty string.`, "INVALID_STATE");
     }
   }
-  const review = "review" in state ? validateReviewDetails(state.review) : undefined;
   const mergeGate = "mergeGate" in state ? validateMergeGateDetails(state.mergeGate) : undefined;
   const agent = "agent" in state ? validateAgentDetails(state.agent) : undefined;
-  return Object.freeze({ ...state, ...(review === undefined ? {} : { review }), ...(mergeGate === undefined ? {} : { mergeGate }), ...(agent === undefined ? {} : { agent }) });
+  return Object.freeze({ ...state, ...(mergeGate === undefined ? {} : { mergeGate }), ...(agent === undefined ? {} : { agent }) });
 }
 
 export function loadState(projectPath) {

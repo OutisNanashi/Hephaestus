@@ -11,8 +11,7 @@ const REQUIRED_DOCUMENTS = Object.freeze({
   currentTask: "CURRENT_TASK.md"
 });
 const OPTIONAL_DOCUMENTS = Object.freeze({
-  agentOutput: "AGENT_OUTPUT.md",
-  reviewNotes: "REVIEW_NOTES.md"
+  agentOutput: "AGENT_OUTPUT.md"
 });
 
 function readRequiredDocument(projectPath, fileName) {
@@ -78,8 +77,7 @@ export function toInspectionSummary(projectState, reportPath = null) {
     currentPhase: projectState.currentPhase,
     currentTask: projectState.currentTask,
     optionalFiles: {
-      agentOutput: projectState.documents.agentOutput !== null,
-      reviewNotes: projectState.documents.reviewNotes !== null
+      agentOutput: projectState.documents.agentOutput !== null
     },
     uncertainty: projectState.uncertainty
   };

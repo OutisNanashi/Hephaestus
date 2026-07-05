@@ -8,8 +8,8 @@ import { validateState } from "../src/state.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
 const baseState = Object.freeze({
-  currentPhase: "10", currentTask: "multi-project", currentBranch: "main", currentPr: null, assignedAgent: null,
-  attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: null, reviewStatus: "not-started",
+  currentPhase: "9", currentTask: "multi-project", currentBranch: "main", currentPr: null, assignedAgent: null,
+  attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: null,
   mergeStatus: "not-started", containerStatus: "healthy", lastGptDecision: null, nextAction: "project-idle"
 });
 
@@ -34,12 +34,12 @@ function entry(id) {
   return {
     id, path: id, assignedAgent: `fixture-agent-${id}`,
     container: { id: `hephaestus-${id}`, workspace: "/workspace" },
-    paths: { state: "STATE.json", log: "BUILD_LOG.md", prompts: "out/prompts", testReports: "out/test_reports", reviewReports: "out/review_reports" }
+    paths: { state: "STATE.json", log: "BUILD_LOG.md", prompts: "out/prompts", testReports: "out/test_reports" }
   };
 }
 
 function context() {
-  const directory = writableTemporaryDirectory("hephaestus-phase10-lifecycle-");
+  const directory = writableTemporaryDirectory("hephaestus-phase9-lifecycle-");
   const root = path.join(directory, "projects");
   makeProject(root, "alpha");
   makeProject(root, "beta");

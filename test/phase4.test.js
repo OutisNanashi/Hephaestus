@@ -9,7 +9,7 @@ import { loadState, saveState } from "../src/state.js";
 const validState = Object.freeze({
   currentPhase: "4", currentTask: "run-one-agent-task", currentBranch: "main", currentPr: null,
   assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false,
-  lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started",
+  lastSuccessfulStep: null, mergeStatus: "not-started",
   containerStatus: "not-started", lastGptDecision: null, nextAction: "agent-run"
 });
 

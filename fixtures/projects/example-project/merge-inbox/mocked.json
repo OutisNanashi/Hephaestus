@@ -4,7 +4,7 @@
   "phase": "0",
   "currentBranch": "main",
   "dirty": false,
-  "retest": { "implementation": true, "review": true },
+  "retest": { "implementation": true },
   "pr": {
     "number": 7,
     "url": "https://fixture.invalid/pr/7",

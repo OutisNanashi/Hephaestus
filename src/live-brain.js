@@ -86,7 +86,7 @@ ${list(decision.allowedFiles)}
 
 ## What Not To Build Yet
 - Do not build Activation Step 6 or any later workflow.
-- Do not build real orchestration, merge, review, dashboard, PR, or coding-agent execution behavior.
+- Do not build real orchestration, merge, dashboard, PR, or coding-agent execution behavior.
 - Do not modify real projects or project registry entries.
 
 ## Forbidden Changes
@@ -95,7 +95,7 @@ ${list(decision.allowedFiles)}
 - Do not modify PLAN.md, STATE.json, CURRENT_TASK.md, BUILD_LOG.md, or documentation unless listed above.
 - Do not register real projects.
 - Do not start Activation Step 6 or any later workflow.
-- Do not start a real coding agent, merge workflow, review workflow, dashboard work, or PR workflow.
+- Do not start a real coding agent, merge workflow, dashboard work, or PR workflow.
 - Do not bypass GPT approval, safety validation, or configured stop conditions.
 
 ## Required Tests

@@ -6,13 +6,12 @@ import { validateState } from "./state.js";
 
 const PROJECT_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CONTAINER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
-const RESOURCE_NAMES = Object.freeze(["state", "log", "prompts", "testReports", "reviewReports"]);
+const RESOURCE_NAMES = Object.freeze(["state", "log", "prompts", "testReports"]);
 const DEFAULT_PATHS = Object.freeze({
   state: "STATE.json",
   log: "BUILD_LOG.md",
   prompts: "out/prompts",
-  testReports: "out/test_reports",
-  reviewReports: "out/review_reports"
+  testReports: "out/test_reports"
 });
 const PROJECT_STATUSES = new Set(["running", "paused", "blocked", "stopped", "idle"]);
 
@@ -57,7 +56,7 @@ function normalizeContainer(raw, id) {
 function normalizePaths(raw, projectPath) {
   const value = raw === undefined ? DEFAULT_PATHS : raw;
   if (!value || Array.isArray(value) || typeof value !== "object" || RESOURCE_NAMES.some((key) => !(key in value)) || Object.keys(value).some((key) => !RESOURCE_NAMES.includes(key))) {
-    fail("Project paths must declare state, log, prompts, testReports, and reviewReports.", "INVALID_MULTI_PROJECT_REGISTRY");
+    fail("Project paths must declare state, log, prompts, and testReports.", "INVALID_MULTI_PROJECT_REGISTRY");
   }
   return Object.freeze(Object.fromEntries(RESOURCE_NAMES.map((name) => {
     const resourcePath = relativeResource(value[name], projectPath, `Project ${name} path`);

@@ -16,7 +16,6 @@ const validState = Object.freeze({
   blocked: false,
   usageLimitPaused: false,
   lastSuccessfulStep: null,
-  reviewStatus: "not-started",
   mergeStatus: "not-started",
   containerStatus: "not-started",
   lastGptDecision: null,
@@ -100,7 +99,6 @@ test("reads a valid project fixture", () => {
     const projectState = inspectProject(allowedRoot, projectPath);
     assert.equal(normalizeLineEndings(projectState.documents.plan), "# Example project\n\nThis fixture exists solely to prove Phase 0 project-file validation.\n");
     assert.equal(projectState.documents.agentOutput, null);
-    assert.equal(projectState.documents.reviewNotes, null);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -203,16 +201,6 @@ test("reads optional AGENT_OUTPUT.md when present", () => {
   try {
     fs.writeFileSync(path.join(context.projectPath, "AGENT_OUTPUT.md"), "agent result\n");
     assert.equal(inspectProject(context.allowedRoot, context.projectPath).documents.agentOutput, "agent result\n");
-  } finally {
-    fs.rmSync(context.directory, { recursive: true, force: true });
-  }
-});
-
-test("reads optional REVIEW_NOTES.md when present", () => {
-  const context = makeContext();
-  try {
-    fs.writeFileSync(path.join(context.projectPath, "REVIEW_NOTES.md"), "review note\n");
-    assert.equal(inspectProject(context.allowedRoot, context.projectPath).documents.reviewNotes, "review note\n");
   } finally {
     fs.rmSync(context.directory, { recursive: true, force: true });
   }

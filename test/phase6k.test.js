@@ -34,7 +34,7 @@ const REQUIRED_MODULES = Object.freeze([
 const validState = Object.freeze({
   currentPhase: "6K", currentTask: "activation-closeout", currentBranch: "main", currentPr: null,
   assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false,
-  lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started",
+  lastSuccessfulStep: null, mergeStatus: "not-started",
   containerStatus: "not-started", lastGptDecision: null, nextAction: "agent-run"
 });
 
