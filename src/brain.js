@@ -5,7 +5,7 @@ function projectGoal(plan) {
   return heading ? heading.replace(/^#+\s+/u, "").trim() : null;
 }
 
-/** Create a deterministic, read-only request for the mocked Phase 2 brain. */
+/** Create a deterministic, read-only request for the brain. */
 export function createBrainRequest(projectState) {
   if (!projectState || typeof projectState !== "object") {
     fail("A normalized project state is required to create a brain request.", "INVALID_PROJECT_STATE");
@@ -14,6 +14,7 @@ export function createBrainRequest(projectState) {
     projectPath: projectState.projectPath,
     projectGoal: projectGoal(projectState.documents.plan),
     planContext: projectState.documents.plan,
+    agentOutput: projectState.documents.agentOutput ?? null,
     currentPhase: projectState.currentPhase,
     currentTask: projectState.currentTask,
     uncertainty: projectState.uncertainty
@@ -27,6 +28,8 @@ function validateStringArray(value, name, label, code) {
   return Object.freeze([...value]);
 }
 
+export const LOOP_SIGNALS = Object.freeze(["continue", "task-complete", "blocked"]);
+
 function validateDecision(decision, label, code) {
   if (decision === null || Array.isArray(decision) || typeof decision !== "object") {
     fail(`${label} must be a JSON object.`, code);
@@ -35,7 +38,7 @@ function validateDecision(decision, label, code) {
   for (const key of required) {
     if (!(key in decision)) fail(`${label} is missing required key: ${key}.`, code);
   }
-  if (Object.keys(decision).some((key) => !required.includes(key))) {
+  if (Object.keys(decision).some((key) => !required.includes(key) && key !== "loopSignal")) {
     fail(`${label} contains unsupported keys.`, code);
   }
   for (const key of ["nextAction", "rationale"]) {
@@ -43,9 +46,14 @@ function validateDecision(decision, label, code) {
       fail(`${label} ${key} must be a non-empty string.`, code);
     }
   }
+  const loopSignal = decision.loopSignal === undefined ? "continue" : decision.loopSignal;
+  if (!LOOP_SIGNALS.includes(loopSignal)) {
+    fail(`${label} loopSignal must be one of ${LOOP_SIGNALS.join(", ")}.`, code);
+  }
   return Object.freeze({
     nextAction: decision.nextAction,
     rationale: decision.rationale,
+    loopSignal,
     allowedFiles: validateStringArray(decision.allowedFiles, "allowedFiles", label, code),
     requiredTests: validateStringArray(decision.requiredTests, "requiredTests", label, code),
     stopConditions: validateStringArray(decision.stopConditions, "stopConditions", label, code)

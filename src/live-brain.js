@@ -7,7 +7,8 @@ import { requestOpenAIDecision } from "./openai-provider.js";
 import { assertRealPathWithinRoot, resolveSafePath } from "./safe-path.js";
 
 const OPENAI_PROVIDERS = new Set(["openai", "gpt"]);
-const MAX_PLAN_CONTEXT_CHARS = 1_200;
+const MAX_PLAN_CONTEXT_CHARS = 6_000;
+const MAX_AGENT_OUTPUT_CHARS = 2_000;
 const REQUIRED_PROMPT_SECTIONS = Object.freeze([
   "Project name:",
   "Current phase:",
@@ -49,7 +50,12 @@ function savePrompt(projectPath, prompt, promptOutputPath) {
 
 function providerInput(request, task, projectName) {
   const planContext = request.planContext.slice(0, MAX_PLAN_CONTEXT_CHARS);
-  return `Return only JSON with nextAction, rationale, allowedFiles, requiredTests, and stopConditions. Plan one bounded coding-agent task for project ${projectName}. Task: ${task}. allowedFiles must be relative project paths, never .env files. Do not include secrets, unrelated paths, command execution, or file edits by the model itself.\n\nGoal: ${request.projectGoal ?? "unspecified"}\nPhase: ${request.currentPhase}\nCurrent task: ${request.currentTask}\nPlan excerpt:\n${planContext}`;
+  // The freshest agent report matters most, so keep its tail when truncating.
+  const agentOutput = typeof request.agentOutput === "string" && request.agentOutput.trim() !== ""
+    ? request.agentOutput.slice(-MAX_AGENT_OUTPUT_CHARS)
+    : null;
+  const agentSection = agentOutput === null ? "" : `\n\nLatest coding-agent report (decide whether the task is complete, needs repair, or is blocked):\n${agentOutput}`;
+  return `Return only JSON with nextAction, rationale, allowedFiles, requiredTests, stopConditions, and loopSignal. loopSignal must be "continue" when the coding agent should run the planned task next, "task-complete" when the latest agent report shows the current task is finished and verified, or "blocked" when automation cannot safely proceed and the owner must act. Plan one bounded coding-agent task for project ${projectName}. Task: ${task}. allowedFiles must be relative project paths, never .env files. Do not include secrets, unrelated paths, command execution, or file edits by the model itself.\n\nGoal: ${request.projectGoal ?? "unspecified"}\nPhase: ${request.currentPhase}\nCurrent task: ${request.currentTask}\nPlan excerpt:\n${planContext}${agentSection}`;
 }
 
 function list(items) {
@@ -82,20 +88,17 @@ ${list(decision.allowedFiles)}
 
 ## What To Build
 - The smallest project-local implementation needed for the objective.
-- Only changes that fit the allowed files and the dummy-project task.
+- Only changes that fit the allowed files and the current task.
 
 ## What Not To Build Yet
-- Do not build Activation Step 6 or any later workflow.
-- Do not build real orchestration, merge, dashboard, PR, or coding-agent execution behavior.
-- Do not modify real projects or project registry entries.
+- Do not implement anything beyond this bounded task.
+- Do not start later PLAN.md phases or features that were not requested.
 
 ## Forbidden Changes
 - Do not change files outside the allowed list.
 - Do not read, reveal, modify, commit, or stage secrets or .env files.
-- Do not modify PLAN.md, STATE.json, CURRENT_TASK.md, BUILD_LOG.md, or documentation unless listed above.
-- Do not register real projects.
-- Do not start Activation Step 6 or any later workflow.
-- Do not start a real coding agent, merge workflow, dashboard work, or PR workflow.
+- Do not modify PLAN.md, BUILDING_REFERENCE.md, STATE.json, CURRENT_TASK.md, BUILD_LOG.md, or TESTS.json; the conductor owns them.
+- Do not merge, force push, deploy, or spend money.
 - Do not bypass GPT approval, safety validation, or configured stop conditions.
 
 ## Required Tests
@@ -120,7 +123,6 @@ ${list(decision.stopConditions)}
 - Required tests were run and passed.
 - No secrets were read, printed, changed, committed, or staged.
 - No work occurred outside the selected project.
-- No Activation Step 6 or real orchestration work was started.
 - The final report clearly states changed files, tests run, and any blockers.
 
 ## Final Report Format

@@ -197,7 +197,7 @@ test("STATE.json records the validated mocked decision", () => {
     runSuccessfulCycle(context);
     const state = loadState(context.projectPath);
     assert.equal(state.nextAction, validDecision.nextAction);
-    assert.deepEqual(JSON.parse(state.lastGptDecision), validDecision);
+    assert.deepEqual(JSON.parse(state.lastGptDecision), { ...validDecision, loopSignal: "continue" });
     assert.equal(state.blocked, false);
   } finally {
     fs.rmSync(context.directory, { recursive: true, force: true });
