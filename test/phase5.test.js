@@ -11,6 +11,8 @@ import { loadTestDeclaration, projectFingerprint, saveTestEvidence, verifyTestEv
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
 const decision = Object.freeze({ nextAction: "plan-farewell", rationale: "Keep the dummy change bounded.", allowedFiles: ["src/greeting.js", "test/greeting.test.js"], requiredTests: ["npm test"], stopConditions: ["Stop if required files are missing."] });
+// Validation adds the loop signal (defaulting to "continue") to accepted decisions.
+const validated = Object.freeze({ ...decision, loopSignal: "continue" });
 const openaiBrain = Object.freeze({ provider: "openai", apiKeyEnv: "OPENAI_API_KEY", model: "gpt-5.4-mini" });
 
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
@@ -25,11 +27,11 @@ function project() {
 
 test("valid OpenAI output is accepted without project mutation", async () => {
   const context = project(); const before = fs.readdirSync(context.target).sort();
-  try { assert.deepEqual(await requestOpenAIDecision({ apiKey: "test-key", model: openaiBrain.model, input: "plan", fetchImpl: openaiResponse(decision) }), decision); assert.deepEqual(fs.readdirSync(context.target).sort(), before); } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+  try { assert.deepEqual(await requestOpenAIDecision({ apiKey: "test-key", model: openaiBrain.model, input: "plan", fetchImpl: openaiResponse(decision) }), validated); assert.deepEqual(fs.readdirSync(context.target).sort(), before); } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
 });
 
 test("nested OpenAI response output is accepted", async () => {
-  assert.deepEqual(await requestOpenAIDecision({ apiKey: "test-key", model: openaiBrain.model, input: "plan", fetchImpl: nestedOpenaiResponse(decision) }), decision);
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "test-key", model: openaiBrain.model, input: "plan", fetchImpl: nestedOpenaiResponse(decision) }), validated);
 });
 
 test("malformed OpenAI output and missing keys are rejected safely", async () => {
@@ -42,19 +44,19 @@ test("malformed OpenAI output and missing keys are rejected safely", async () =>
 test("a valid decision is accepted on the first attempt without a retry", async () => {
   let calls = 0;
   const fetchImpl = async () => { calls += 1; return { ok: true, json: async () => ({ output_text: JSON.stringify(decision) }) }; };
-  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), decision);
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), validated);
   assert.equal(calls, 1);
 });
 
 test("fenced JSON decision output is tolerated without weakening validation", async () => {
   const fenced = async () => ({ ok: true, json: async () => ({ output_text: `\`\`\`json\n${JSON.stringify(decision)}\n\`\`\`` }) });
-  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl: fenced }), decision);
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl: fenced }), validated);
 });
 
 test("one narrow retry recovers a valid decision after a first non-JSON reply", async () => {
   let calls = 0;
   const fetchImpl = async () => { calls += 1; return { ok: true, json: async () => ({ output_text: calls === 1 ? "Sure! Here is the plan (no JSON)." : JSON.stringify(decision) }) }; };
-  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), decision);
+  assert.deepEqual(await requestOpenAIDecision({ apiKey: "k", model: openaiBrain.model, input: "plan", fetchImpl }), validated);
   assert.equal(calls, 2);
 });
 
@@ -100,7 +102,7 @@ test("validated OpenAI output saves only a bounded prompt and cannot directly mu
     const result = await runLiveBrainCycle({ allowedRoot: context.root, projectPath: context.target, brain: openaiBrain, task: "Plan a farewell function and one test.", projectName: "demo", env: { OPENAI_API_KEY: "test-key" }, fetchImpl: openaiResponse(decision) });
     const prompt = fs.readFileSync(result.promptPath, "utf8");
     for (const section of ["Project name: demo", "Current phase:", "Current task:", "## Objective", "## Context Files To Read", "## Allowed Changes and Files", "## What To Build", "## What Not To Build Yet", "## Forbidden Changes", "## Required Tests", "## Required Evidence", "## Stop Conditions", "## Completion Criteria", "## Final Report Format"]) assert.match(prompt, new RegExp(section.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-    assert.match(prompt, /Do not read, reveal, modify, commit, or stage secrets/u); assert.match(prompt, /Do not start Activation Step 6/u);
+    assert.match(prompt, /Do not read, reveal, modify, commit, or stage secrets/u); assert.match(prompt, /the conductor owns them/u);
     assert.match(prompt, /Do not bypass GPT approval/u);
     assert.equal(fs.readFileSync(path.join(context.target, "STATE.json"), "utf8"), state); assert.equal(fs.readFileSync(path.join(context.target, "src/greeting.js"), "utf8"), source); assert.equal(fs.readFileSync(path.join(context.target, "test/greeting.test.js"), "utf8"), testSource); assert.equal(fs.existsSync(path.join(context.target, "AGENT_OUTPUT.md")), false);
     await assert.rejects(() => runLiveBrainCycle({ allowedRoot: context.root, projectPath: context.target, brain: openaiBrain, env: { OPENAI_API_KEY: "test-key" }, fetchImpl: openaiResponse({ ...decision, allowedFiles: [".env"] }) }), (error) => code(error, "INVALID_PROVIDER_DECISION"));
