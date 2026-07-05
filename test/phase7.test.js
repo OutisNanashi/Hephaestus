@@ -4,95 +4,48 @@ import path from "node:path";
 import test from "node:test";
 import { run } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
-import { ingestReviewFixture, normalizeReviewItem } from "../src/review.js";
-import { loadState } from "../src/state.js";
+import { createMergeRelay, evaluateMergeReadiness, recordMergeResult, saveMergeReadinessReport } from "../src/merge-gate.js";
+import { loadState, validateState } from "../src/state.js";
+import { loadTestDeclaration, projectFingerprint, saveTestEvidence } from "../src/test-gate.js";
+import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
-const state = Object.freeze({ currentPhase: "7", currentTask: "review-ingestion", currentBranch: "main", currentPr: "https://fixture.invalid/pr/7", assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "blocked", containerStatus: "healthy", lastGptDecision: null, nextAction: "review-ingest" });
-function writeJson(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
-function context() {
-  const directory = fs.mkdtempSync(path.join(path.resolve("test"), "tmp-review-")); const root = path.join(directory, "projects"); const project = path.join(root, "demo"); fs.mkdirSync(project, { recursive: true });
-  for (const name of ["PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "CURRENT_TASK.md"]) fs.writeFileSync(path.join(project, name), "fixture\n");
-  writeJson(path.join(project, "STATE.json"), state); writeJson(path.join(directory, "projects.json"), { projects: [{ id: "demo", path: "demo" }] }); writeJson(path.join(directory, "config.json"), { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
-  return { directory, root, project, config: path.join(directory, "config.json") };
+const timestamp = "2026-06-23T12:00:00.000Z";
+const state = Object.freeze({ currentPhase: "7", currentTask: "merge-gate", currentBranch: "phase7", currentPr: "https://fixture.invalid/pr/7", assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: "tests-verified", mergeStatus: "blocked", containerStatus: "healthy", lastGptDecision: null, nextAction: "merge-readiness" });
+
+function json(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
+function input(overrides = {}) { return { project: "demo", phase: "7", currentBranch: "phase7", dirty: false, retest: { implementation: true }, pr: { number: 7, url: "https://fixture.invalid/pr/7", headBranch: "phase7", baseBranch: "master", status: "OPEN", mergeable: true, headCommit: "abc123" }, approval: { approved: true, approvedBy: "GPT", project: "demo", phase: "7", pr: 7, branch: "phase7", headCommit: "abc123", decidedAt: "2026-06-23T11:00:00.000Z", stale: false }, ...overrides }; }
+function context({ evidence = true } = {}) {
+  const directory = writableTemporaryDirectory("hephaestus-phase7-");
+  for (const name of ["PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "CURRENT_TASK.md"]) fs.writeFileSync(path.join(directory, name), "fixture\n");
+  fs.writeFileSync(path.join(directory, "source.txt"), "source\n");
+  json(path.join(directory, "STATE.json"), state);
+  json(path.join(directory, "TESTS.json"), { requiredCommands: [{ id: "unit", outputRequired: true }], watchedFiles: ["source.txt"] });
+  if (evidence) saveTestEvidence(directory, { projectFingerprint: projectFingerprint(directory, loadTestDeclaration(directory)), commands: [{ id: "unit", exitCode: 0, stdout: "ok\n", stderr: "" }] });
+  return directory;
 }
-function fixture(c, name, value) { const directory = path.join(c.root, "reviews"); fs.mkdirSync(directory, { recursive: true }); writeJson(path.join(directory, name), value); return `reviews/${name}`; }
+function gate(projectPath, overrides = {}) { return evaluateMergeReadiness({ projectPath, state: loadState(projectPath), input: input(overrides), now: timestamp }); }
+function codes(result) { return result.blockers.map((item) => item.code); }
+function cleanup(directory) { fs.rmSync(directory, { recursive: true, force: true }); }
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
-const base = { timestamp: "2026-06-23T10:00:00.000Z", sources: [{ source: "CodeRabbit", comments: [{ externalId: "cr-1", filePath: "src/a.js", line: 4, severity: "high", category: "correctness", body: "Protect the empty array case.", actionable: true }] }, { source: "Qodo", availability: "paused" }] };
+function cliContext(fixture) {
+  const directory = writableTemporaryDirectory("hephaestus-phase7-cli-"); const root = path.join(directory, "projects"); const project = path.join(root, "demo"); fs.mkdirSync(project, { recursive: true });
+  for (const name of ["PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "CURRENT_TASK.md"]) fs.writeFileSync(path.join(project, name), "fixture\n");
+  json(path.join(project, "STATE.json"), state); fs.mkdirSync(path.join(root, "merge-fixtures"), { recursive: true }); json(path.join(root, "merge-fixtures", "fixture.json"), fixture);
+  const config = path.join(directory, "config.json"); json(config, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" }); json(path.join(directory, "projects.json"), { projects: [{ id: "demo", path: "demo" }] });
+  return { directory, config, fixture: "merge-fixtures/fixture.json" };
+}
+function mergeResult() { return { project: "demo", phase: "7", pr: "7", headCommit: "abc123", mergeCommit: "merge456", actor: "approved-executor", mergedAt: timestamp, gateReportPath: "out/merge_reports/phase-7-pr-7-legacy.json" }; }
 
-test("imports review comments, records Qodo as unavailable, and blocks unresolved actionable work", () => {
-  const c = context(); try {
-    const result = ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "review.json", base), state });
-    assert.equal(result.status, "completed"); assert.equal(result.state.review.unresolvedBlockers, 1); assert.equal(result.state.review.mergeBlocked, true); assert.deepEqual(result.state.review.unavailableSources, ["Qodo"]); assert.equal(result.state.blocked, true);
-    const notes = fs.readFileSync(path.join(c.project, "REVIEW_NOTES.md"), "utf8"); assert.match(notes, /Imported comments/u); assert.match(notes, /Current review-blocking status/u); assert.match(notes, /CodeRabbit/u);
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
-
-test("duplicate comments preserve one blocker and one original first-seen timestamp", () => {
-  const c = context(); try {
-    const first = fixture(c, "first.json", base); ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: first, state });
-    const second = fixture(c, "second.json", { ...base, timestamp: "2026-06-23T11:00:00.000Z" }); const rerun = ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: second, state: loadState(c.project) });
-    assert.equal(rerun.duplicateCount, 1); assert.equal(rerun.items.length, 1); assert.equal(rerun.items[0].firstSeenAt, "2026-06-23T10:00:00.000Z"); assert.equal(rerun.items[0].lastSeenAt, "2026-06-23T11:00:00.000Z");
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
-
-test("deduplication keeps flattened GPT decision fields consistent with the canonical dismissal", () => {
-  const c = context(); try {
-    const dismissed = {
-      timestamp: "2026-06-23T10:00:00.000Z",
-      sources: [{ source: "GPT", comments: [{ externalId: "gpt-dismissal", body: "Style preference", actionable: false, status: "dismissed", gptDecision: { dismissed: true, reason: "Out of scope.", decidedAt: "2026-06-23T10:00:00.000Z" } }] }]
-    };
-    ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "dismissed.json", dismissed), state });
-    const duplicate = { timestamp: "2026-06-23T11:00:00.000Z", sources: [{ source: "GPT", comments: [{ externalId: "gpt-dismissal", body: "Style preference", actionable: false }] }] };
-    const result = ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "duplicate-dismissal.json", duplicate), state: loadState(c.project) });
-    const item = result.items[0];
-    assert.equal(item.status, "dismissed"); assert.equal(item.gptDecision.dismissed, true); assert.equal(item.gptDecisionRequired, item.gptDecision.required); assert.equal(item.gptDismissed, item.gptDecision.dismissed); assert.equal(item.dismissalReason, item.gptDecision.dismissalReason);
-    const stored = JSON.parse(fs.readFileSync(path.join(c.project, "out", "review_reports", "review-items.json"), "utf8")).items[0];
-    assert.equal(stored.gptDismissed, stored.gptDecision.dismissed); assert.equal(stored.dismissalReason, stored.gptDecision.dismissalReason);
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
-
-test("dismissals require explicit GPT metadata and non-actionable dismissals do not block", () => {
-  assert.throws(() => normalizeReviewItem({ source: "GPT", body: "Ignore this", status: "dismissed", actionable: false }, { timestamp: "2026-06-23T10:00:00.000Z" }), (error) => code(error, "MISSING_GPT_DISMISSAL_DECISION"));
-  const item = normalizeReviewItem({ source: "GPT", body: "Style preference", status: "dismissed", actionable: false, gptDecision: { dismissed: true, reason: "Out of scope for this phase.", decidedAt: "2026-06-23T10:01:00.000Z" } }, { timestamp: "2026-06-23T10:00:00.000Z" });
-  assert.equal(item.gptDecision.dismissed, true); assert.equal(item.blocksMerge, false);
-});
-
-test("comments without provider ids receive a stable generated id", () => {
-  const raw = { source: "Codex", filePath: "src/a.js", lineStart: 3, body: "Check this condition." };
-  const first = normalizeReviewItem(raw, { timestamp: "2026-06-23T10:00:00.000Z" });
-  const second = normalizeReviewItem(raw, { timestamp: "2026-06-23T11:00:00.000Z" });
-  assert.match(first.id, /^review-[a-f0-9]{24}$/u); assert.equal(first.id, second.id); assert.equal(first.gptDecisionRequired, true);
-});
-
-test("resolved comments and manual REVIEW_NOTES context are retained", () => {
-  const c = context(); try {
-    fs.writeFileSync(path.join(c.project, "REVIEW_NOTES.md"), "# Manual context\n\nKeep this text.\n");
-    const review = { timestamp: "2026-06-23T10:00:00.000Z", sources: [{ source: "Copilot", comments: [{ externalId: "cp-1", body: "Already fixed.", status: "resolved", actionable: true }] }] };
-    const result = ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "resolved.json", review), state });
-    assert.equal(result.state.review.resolvedCount, 1); assert.equal(result.state.review.mergeBlocked, false); assert.equal(result.state.blocked, false); assert.match(fs.readFileSync(path.join(c.project, "REVIEW_NOTES.md"), "utf8"), /Keep this text/u);
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
-
-test("fixture fetch failures become retryable blocked review state", () => {
-  const c = context(); try {
-    const result = ingestReviewFixture({ allowedRoot: c.root, projectPath: c.project, fixturePath: fixture(c, "failure.json", { providerFailure: true, message: "CodeRabbit fixture unavailable", retryable: true }), state });
-    assert.equal(result.status, "failed"); assert.equal(result.state.review.ingestionStatus, "failed"); assert.equal(result.state.nextAction, "retry-review-ingestion"); assert.equal(result.state.review.mergeBlocked, true);
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
-
-test("review ingest CLI uses only a local fixture", () => {
-  const c = context(); try {
-    const reviewPath = fixture(c, "cli.json", base); let output = ""; const original = process.stdout.write; process.stdout.write = (chunk) => { output += chunk; return true; };
-    try { assert.equal(run(["review", "ingest", "demo", "--config", c.config, "--fixture", reviewPath]), 0); } finally { process.stdout.write = original; }
-    assert.equal(JSON.parse(output).review.unresolvedBlockers, 1);
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
-
-test("review ingest refuses an omitted project target without writing state or notes", () => {
-  const c = context(); try {
-    const reviewPath = fixture(c, "missing-target.json", base);
-    const statePath = path.join(c.project, "STATE.json"); const stateBefore = fs.readFileSync(statePath, "utf8");
-    assert.throws(() => run(["review", "ingest", "--config", c.config, "--fixture", reviewPath]), (error) => code(error, "INVALID_ARGUMENT"));
-    assert.equal(fs.readFileSync(statePath, "utf8"), stateBefore); assert.equal(fs.existsSync(path.join(c.project, "REVIEW_NOTES.md")), false);
-  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
-});
+test("merge blocks without structured test evidence", () => { const p = context({ evidence: false }); try { assert.ok(codes(gate(p)).includes("MISSING_TEST_EVIDENCE")); } finally { cleanup(p); } });
+test("merge blocks failed, missing, and outputless test commands", () => { const p = context(); try { saveTestEvidence(p, { projectFingerprint: projectFingerprint(p, loadTestDeclaration(p)), commands: [{ id: "unit", exitCode: 1, stdout: "", stderr: "failed" }] }); assert.ok(codes(gate(p)).includes("FAILED_TESTS")); saveTestEvidence(p, { projectFingerprint: projectFingerprint(p, loadTestDeclaration(p)), commands: [] }); assert.ok(codes(gate(p)).includes("MISSING_REQUIRED_TEST_COMMAND")); saveTestEvidence(p, { projectFingerprint: projectFingerprint(p, loadTestDeclaration(p)), commands: [{ id: "unit", exitCode: 0, stdout: "", stderr: "" }] }); assert.ok(codes(gate(p)).includes("MISSING_TEST_OUTPUT")); } finally { cleanup(p); } });
+test("merge blocks a required test command without an exit code", () => { const p = context(); try { saveTestEvidence(p, { projectFingerprint: projectFingerprint(p, loadTestDeclaration(p)), commands: [{ id: "unit", stdout: "ok", stderr: "" }] }); assert.ok(codes(gate(p)).includes("MALFORMED_TEST_EVIDENCE")); } finally { cleanup(p); } });
+test("merge blocks missing implementation retests", () => { const p = context(); try { assert.ok(codes(gate(p, { retest: { implementation: false } })).includes("RETEST_AFTER_IMPLEMENTATION_REQUIRED")); fs.writeFileSync(path.join(p, "source.txt"), "changed\n"); assert.ok(codes(gate(p)).includes("RETEST_AFTER_IMPLEMENTATION_REQUIRED")); } finally { cleanup(p); } });
+test("merge blocks absent, stale, and wrongly scoped GPT approval", () => { const p = context(); try { assert.ok(codes(gate(p, { approval: null })).includes("MISSING_GPT_APPROVAL")); assert.ok(codes(gate(p, { approval: { ...input().approval, stale: true } })).includes("STALE_GPT_APPROVAL")); assert.ok(codes(gate(p, { approval: { ...input().approval, headCommit: "other" } })).includes("GPT_APPROVAL_SCOPE_MISMATCH")); } finally { cleanup(p); } });
+test("merge blocks missing or invalid project metadata", () => { const p = context(); try { assert.ok(codes(gate(p, { project: null })).includes("MISSING_PROJECT_METADATA")); assert.ok(codes(gate(p, { project: "bad/project" })).includes("MISSING_PROJECT_METADATA")); } finally { cleanup(p); } });
+test("merge blocks dirty trees, wrong branches, and incomplete or unmergeable PRs", () => { const p = context(); try { assert.ok(codes(gate(p, { dirty: true })).includes("DIRTY_WORKTREE")); assert.ok(codes(gate(p, { currentBranch: "other" })).includes("WRONG_BRANCH")); assert.ok(codes(gate(p, { pr: null })).includes("MISSING_PR_METADATA")); assert.ok(codes(gate(p, { pr: { ...input().pr, mergeable: null } })).includes("PR_MERGEABILITY_UNCLEAR")); assert.ok(codes(gate(p, { pr: { ...input().pr, mergeable: false } })).includes("PR_UNMERGEABLE")); } finally { cleanup(p); } });
+test("merge blocks next phase before a result is recorded and invalid state", () => { const p = context(); try { assert.ok(codes(gate(p, { nextPhaseRequested: true })).includes("NEXT_PHASE_BEFORE_MERGE_RECORDED")); fs.writeFileSync(path.join(p, "STATE.json"), "{}"); assert.ok(codes(evaluateMergeReadiness({ projectPath: p, state: {}, input: input(), now: timestamp })).includes("INVALID_STATE")); } finally { cleanup(p); } });
+test("all gates passing saves a deterministic readiness report and only emits a non-executing relay", () => { const p = context(); try { const result = gate(p); assert.equal(result.allowed, true); const report = saveMergeReadinessReport(p, result); assert.match(report, /out[\\/]merge_reports[\\/]phase-7-pr-7-legacy\.json$/u); const checked = saveMergeReadinessReport(p, { ...result, reportMode: "merge-check" }); assert.match(checked, /out[\\/]merge_reports[\\/]phase-7-pr-7-merge-check\.json$/u); assert.notEqual(report, checked); const relay = createMergeRelay(result); assert.equal(relay.executable, false); assert.equal(relay.kind, "merge-relay"); } finally { cleanup(p); } });
+test("merge report storage contains malicious phase values", () => { const p = context(); try { const result = gate(p); for (const phase of ["../x", "../../evil", "/tmp/x", "phase/7", "phase\\7", ""]) { const report = saveMergeReadinessReport(p, { ...result, phase }); assert.equal(path.dirname(report), path.join(p, "out", "merge_reports")); assert.equal(path.basename(report), "phase-unknown-pr-7-legacy.json"); } for (const reportMode of ["../x", "../../evil", "/tmp/x", "mode/x", "mode\\x", ""]) { const report = saveMergeReadinessReport(p, { ...result, reportMode }); assert.equal(path.dirname(report), path.join(p, "out", "merge_reports")); assert.equal(path.basename(report), "phase-7-pr-7-unknown.json"); } } finally { cleanup(p); } });
+test("merge result recording is schema-validated, append-only, and enables the next phase", () => { const p = context(); try { const before = fs.readFileSync(path.join(p, "BUILD_LOG.md"), "utf8"); const result = gate(p); const recorded = recordMergeResult({ projectPath: p, state: loadState(p), report: result, mergeCommit: "merge456", actor: "approved-executor", mergedAt: timestamp }); const saved = loadState(p); assert.equal(saved.mergeGate.nextPhaseEligible, true); assert.equal(saved.mergeGate.mergeResult.mergeCommit, "merge456"); assert.ok(fs.readFileSync(path.join(p, "BUILD_LOG.md"), "utf8").startsWith(before)); assert.equal(recorded.result.pr, "7"); } finally { cleanup(p); } });
+test("merge fixture commands reject missing and non-object fixture data with typed errors", () => { const missing = cliContext({}); try { assert.throws(() => run(["merge", "relay", "demo", "--config", missing.config]), (error) => code(error, "INVALID_ARGUMENT")); } finally { cleanup(missing.directory); } for (const value of [null, [], "text", 42, true]) { const c = cliContext(value); try { assert.throws(() => run(["merge", "check", "demo", "--config", c.config, "--fixture", c.fixture]), (error) => code(error, "MERGE_FIXTURE_INVALID")); } finally { cleanup(c.directory); } } });
+test("merge result state combinations are schema-validated", () => { const noResult = { ...state, mergeGate: { readiness: "blocked", implementationRetested: false, nextPhaseEligible: false, mergeResult: null } }; assert.doesNotThrow(() => validateState(noResult)); const result = mergeResult(); assert.throws(() => validateState({ ...state, mergeGate: { readiness: "blocked", implementationRetested: true, nextPhaseEligible: true, mergeResult: result } }), (error) => code(error, "INVALID_STATE")); assert.doesNotThrow(() => validateState({ ...state, mergeGate: { readiness: "merged", implementationRetested: true, nextPhaseEligible: true, mergeResult: result } })); });

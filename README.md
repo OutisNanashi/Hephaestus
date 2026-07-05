@@ -1,6 +1,6 @@
 # Hephaestus
 
-Phase 0 provides a deliberately small, safe repository foundation. It validates configured project folders and creates a project log directory; it does not execute agents, commands, containers, API calls, reviews, or Git workflows.
+Phase 0 provides a deliberately small, safe repository foundation. It validates configured project folders and creates a project log directory; it does not execute agents, commands, containers, API calls, or Git workflows.
 
 ## Commands
 

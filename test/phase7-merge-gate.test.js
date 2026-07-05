@@ -12,34 +12,30 @@ import { loadTestDeclaration, projectFingerprint, saveTestEvidence } from "../sr
 process.chdir(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
 
 const timestamp = "2026-07-02T12:00:00.000Z";
-const state = Object.freeze({ currentPhase: "8", currentTask: "merge-gate", currentBranch: "phase8", currentPr: "https://fixture.invalid/pr/8", assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: "review-ingestion", reviewStatus: "ingested", mergeStatus: "blocked", containerStatus: "healthy", lastGptDecision: null, nextAction: "merge-readiness" });
+const state = Object.freeze({ currentPhase: "7", currentTask: "merge-gate", currentBranch: "phase7", currentPr: "https://fixture.invalid/pr/7", assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: "tests-verified", mergeStatus: "blocked", containerStatus: "healthy", lastGptDecision: null, nextAction: "merge-readiness" });
 
 function json(file, value) { fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); }
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
-function reviewSummary(overrides = {}) { return { attempted: true, ingestionStatus: "succeeded", unresolvedBlockers: 0, dismissedCount: 0, resolvedCount: 1, activeSources: ["CodeRabbit"], unavailableSources: ["Qodo"], mergeBlocked: false, ingestedAt: timestamp, failureReason: null, ...overrides }; }
-function reviewItems(list = [{ source: "CodeRabbit", externalId: "cr-1", body: "Fixed", actionable: true, status: "resolved", firstSeenAt: timestamp, lastSeenAt: timestamp }]) { return { version: 1, items: list }; }
 function mergeInput(overrides = {}) {
   return {
-    now: timestamp, project: "demo", phase: "8", currentBranch: "phase8", dirty: false,
-    retest: { implementation: true, review: true },
-    pr: { number: 8, url: "https://fixture.invalid/pr/8", headBranch: "phase8", baseBranch: "master", status: "OPEN", mergeable: true, headCommit: "abc123" },
-    approval: { approved: true, approvedBy: "GPT", project: "demo", phase: "8", pr: 8, branch: "phase8", headCommit: "abc123", decidedAt: "2026-07-02T11:00:00.000Z", stale: false },
+    now: timestamp, project: "demo", phase: "7", currentBranch: "phase7", dirty: false,
+    retest: { implementation: true },
+    pr: { number: 7, url: "https://fixture.invalid/pr/7", headBranch: "phase7", baseBranch: "master", status: "OPEN", mergeable: true, headCommit: "abc123" },
+    approval: { approved: true, approvedBy: "GPT", project: "demo", phase: "7", pr: 7, branch: "phase7", headCommit: "abc123", decidedAt: "2026-07-02T11:00:00.000Z", stale: false },
     ...overrides
   };
 }
 
 // Build a fully merge-ready project inside a registered config so the merge-check CLI can run against it.
-function context({ review = reviewSummary(), items = reviewItems(), evidence = true, input = mergeInput() } = {}) {
-  const directory = fs.mkdtempSync(path.join(path.resolve("test"), "tmp-p8-"));
+function context({ evidence = true, input = mergeInput() } = {}) {
+  const directory = fs.mkdtempSync(path.join(path.resolve("test"), "tmp-p7-"));
   const root = path.join(directory, "projects");
   const project = path.join(root, "demo");
   fs.mkdirSync(path.join(project, "merge-inbox"), { recursive: true });
   for (const name of ["PLAN.md", "BUILDING_REFERENCE.md", "BUILD_LOG.md", "CURRENT_TASK.md"]) fs.writeFileSync(path.join(project, name), "fixture\n");
   fs.writeFileSync(path.join(project, "source.txt"), "source\n");
-  json(path.join(project, "STATE.json"), { ...state, review });
+  json(path.join(project, "STATE.json"), state);
   json(path.join(project, "TESTS.json"), { requiredCommands: [{ id: "unit", outputRequired: true }], watchedFiles: ["source.txt"] });
-  fs.mkdirSync(path.join(project, "out", "review_reports"), { recursive: true });
-  json(path.join(project, "out", "review_reports", "review-items.json"), items);
   if (evidence) saveTestEvidence(project, { projectFingerprint: projectFingerprint(project, loadTestDeclaration(project)), commands: [{ id: "unit", exitCode: 0, stdout: "ok\n", stderr: "" }] });
   json(path.join(project, "merge-inbox", "mocked.json"), input);
   const config = path.join(directory, "config.json");
@@ -70,7 +66,7 @@ test("golden path: merge-check allows when every local gate passes and writes a 
     assert.equal(output.ready, true);
     assert.deepEqual(output.blockers, []);
     assert.equal(output.headSha.match, true);
-    const expected = path.join(c.project, "out", "merge_reports", "phase-8-pr-8-merge-check.json");
+    const expected = path.join(c.project, "out", "merge_reports", "phase-7-pr-7-merge-check.json");
     assert.equal(output.reportPath, expected);
     const report = JSON.parse(fs.readFileSync(expected, "utf8"));
     assert.equal(report.ready, true);
@@ -107,26 +103,9 @@ test("blocked without test evidence and with failed / missing-command / outputle
 test("blocked when implementation changes after the last test run (retest-after-fix)", () => {
   const c = context();
   try {
-    assert.ok(blockers(gate(c, { retest: { implementation: false, review: true } })).includes("RETEST_AFTER_IMPLEMENTATION_REQUIRED"));
-    assert.ok(blockers(gate(c, { retest: { implementation: true, review: false } })).includes("RETEST_AFTER_REVIEW_REQUIRED"));
+    assert.ok(blockers(gate(c, { retest: { implementation: false } })).includes("RETEST_AFTER_IMPLEMENTATION_REQUIRED"));
     fs.writeFileSync(path.join(c.project, "source.txt"), "changed\n");
     assert.ok(blockers(gate(c)).includes("RETEST_AFTER_IMPLEMENTATION_REQUIRED"));
-  } finally { cleanup(c); }
-});
-
-test("blocked on unresolved actionable review and on dismissal lacking a GPT decision", () => {
-  const unresolved = context({ review: reviewSummary({ unresolvedBlockers: 1, mergeBlocked: true }), items: reviewItems([{ source: "CodeRabbit", externalId: "cr-open", body: "Fix", actionable: true, status: "unresolved", firstSeenAt: timestamp, lastSeenAt: timestamp }]) });
-  try { assert.ok(blockers(gate(unresolved)).includes("UNRESOLVED_ACTIONABLE_REVIEW")); } finally { cleanup(unresolved); }
-  const badDismiss = context({ items: reviewItems([{ source: "GPT", externalId: "d1", body: "Skip", actionable: false, status: "dismissed", firstSeenAt: timestamp, lastSeenAt: timestamp }]) });
-  try { assert.ok(blockers(gate(badDismiss)).includes("DISMISSED_REVIEW_MISSING_GPT_DECISION")); } finally { cleanup(badDismiss); }
-});
-
-test("disabled/unavailable external review tools (Qodo paused) do not block by themselves", () => {
-  const c = context();
-  try {
-    const result = gate(c);
-    assert.equal(result.allowed, true);
-    assert.deepEqual(result.evidence.review.unavailableSources, ["Qodo"]);
   } finally { cleanup(c); }
 });
 
@@ -172,6 +151,6 @@ test("merge-check writes only inside the project; no root STATE.json or BUILD_LO
     assert.equal(fs.existsSync(path.resolve("STATE.json")), rootStateBefore);
     assert.equal(fs.existsSync(path.resolve("BUILD_LOG.md")), rootLogBefore);
     assert.equal(fs.readFileSync(path.resolve("PLAN.md"), "utf8"), planBefore);
-    assert.ok(fs.existsSync(path.join(c.project, "out", "merge_reports", "phase-8-pr-8-merge-check.json")));
+    assert.ok(fs.existsSync(path.join(c.project, "out", "merge_reports", "phase-7-pr-7-merge-check.json")));
   } finally { cleanup(c); }
 });

@@ -20,7 +20,7 @@ const CLI_PATH = "src/cli.js";
 const validState = Object.freeze({
   currentPhase: "6F", currentTask: "codex-readonly-exec", currentBranch: "main", currentPr: null,
   assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false,
-  lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started",
+  lastSuccessfulStep: null, mergeStatus: "not-started",
   containerStatus: "not-started", lastGptDecision: null, nextAction: "agent-run"
 });
 

@@ -25,7 +25,6 @@ const validState = Object.freeze({
   blocked: false,
   usageLimitPaused: false,
   lastSuccessfulStep: null,
-  reviewStatus: "not-started",
   mergeStatus: "not-started",
   containerStatus: "not-started",
   lastGptDecision: null,

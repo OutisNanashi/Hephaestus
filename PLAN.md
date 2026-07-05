@@ -5,7 +5,7 @@ The user still creates the project plan manually.
 The system automates the building phase.
 The goal is to let multiple projects build in parallel with different coding agents, while GPT acts as the central brain for each project.
 The user is not trying to automate creativity, planning, or project ownership.
-The user is trying to automate the repetitive execution loop that currently consists of copying GPT prompts into coding agents, copying coding-agent outputs back into GPT, approving commands blindly, waiting for results, handling review comments, and repeating the same process until the project phase is complete.
+The user is trying to automate the repetitive execution loop that currently consists of copying GPT prompts into coding agents, copying coding-agent outputs back into GPT, approving commands blindly, waiting for results, and repeating the same process until the project phase is complete.
 2. Core idea
 The system replaces this manual loop.
 ```text
@@ -32,7 +32,7 @@ Coding agent runs tests
 Coding agent reports result
 Conductor sends result back to GPT brain
 GPT decides next step
-Coding agent continues, repairs, reviews, merges, or reports blocker
+Coding agent continues, repairs, merges, or reports blocker
 Loop repeats
 ```
 The user should no longer be the copy-paste middleman.
@@ -57,8 +57,6 @@ No pasting agent outputs
 No reading every command
 No clicking approve
 No manually running tests
-No manually handling CodeRabbit comments
-No manually handling Qodo comments
 No manually deciding every repair prompt
 No manually merging
 No manually moving from one phase to the next
@@ -69,7 +67,6 @@ Henri creates the plan.
 GPT acts as chief engineer.
 Coding agents execute.
 The conductor moves messages and state.
-Review tools check quality.
 The coding agent merges after GPT approval.
 Henri is notified only for true manual blockers.
 ```
@@ -102,22 +99,17 @@ Read BUILD_LOG.md
 Read STATE.json
 Read CURRENT_TASK.md
 Read AGENT_OUTPUT.md
-Read REVIEW_NOTES.md
 Read coding-agent reports
 Interpret test failures
-Interpret Qodo review comments
-Interpret CodeRabbit review comments
 Decide whether to continue, repair, retry, switch agent, merge, pause, or stop
 Create next coding-agent prompt
 Create repair prompts
-Create review-fix prompts
 Approve or reject merge readiness
 Create summaries when context gets long
 Decide when user notification is required
 ```
 GPT is the decision maker.
 It decides what the coding agent should do next.
-It decides whether review comments matter.
 It decides whether a phase is complete.
 It decides whether merge approval is allowed.
 B. Build Conductor
@@ -180,9 +172,6 @@ Run lint
 Run typecheck
 Fix failures
 Open or update PRs
-Read Qodo comments
-Read CodeRabbit comments
-Report review comments to GPT
 Apply GPT’s repair instructions
 Rerun tests after fixes
 Merge after GPT approval
@@ -190,34 +179,8 @@ Update BUILD_LOG.md and STATE.json when instructed
 Report blockers
 ```
 The coding agent is the executor.
-It builds, tests, fixes, reviews, and merges.
-D. Review agents
-Review agents check quality.
-Examples.
-```text
-CodeRabbit
-Qodo
-Codex review
-GitHub Copilot review
-Amazon Q security scanning
-```
-Responsibilities.
-```text
-Review PRs
-Find bugs
-Find missing tests
-Find security issues
-Find poor code quality
-Find inconsistent implementation
-Leave comments
-Suggest improvements
-```
-The user does not manually handle review comments.
-The review comments enter the loop.
-The coding agent reads them and reports them to GPT.
-GPT decides what matters.
-The coding agent fixes what GPT tells it to fix.
-E. Containers
+It builds, tests, fixes, and merges.
+D. Containers
 Each project should run inside an isolated container.
 A container is not just a folder.
 A folder is only the project location.
@@ -334,7 +297,6 @@ C:\Projects\Kioku
   CURRENT_TASK.md
   AGENT_OUTPUT.md
   HUMAN_NEEDED.md
-  REVIEW_NOTES.md
   docker
     Dockerfile
     docker-compose.yml
@@ -343,7 +305,6 @@ C:\Projects\Kioku
     agent_outputs
     summaries
     test_reports
-    review_reports
     merge_reports
 ```
 The structure should be consistent across projects so the conductor can operate automatically.
@@ -389,7 +350,6 @@ Agent used
 Prompt summary
 Files changed
 Tests run
-Review comments handled
 Result
 Merge status
 Next step
@@ -407,7 +367,6 @@ Attempt count
 Blocked status
 Usage-limit status
 Last successful step
-Review status
 Merge status
 Container status
 Last GPT decision
@@ -422,7 +381,6 @@ Allowed files
 Forbidden files
 Expected result
 Tests the coding agent must run
-Review requirements
 Stop conditions
 Merge conditions
 ```
@@ -435,8 +393,6 @@ What files changed
 What tests ran
 What passed
 What failed
-What review comments were found
-What review comments were fixed
 What is blocked
 What the agent recommends next
 ```
@@ -451,21 +407,6 @@ What file to edit if needed
 What command to run if needed
 What credential or login is needed
 What to report back
-```
-REVIEW_NOTES.md
-Stores review comments.
-Contains.
-```text
-CodeRabbit comments
-Qodo comments
-Codex review comments
-Copilot review comments
-GPT review notes
-Comments to fix
-Comments dismissed by GPT
-Resolved items
-Unresolved items
-Retest result after review fixes
 ```
 10. Normal build loop
 The normal loop works like this.
@@ -496,7 +437,7 @@ The normal loop works like this.
 
 13. Conductor sends output back to GPT brain
 
-14. GPT brain decides whether to continue, repair, review, merge, pause, switch agent, or notify the user
+14. GPT brain decides whether to continue, repair, merge, pause, switch agent, or notify the user
 
 15. Loop continues
 ```
@@ -528,7 +469,6 @@ Separate container
 Separate logs
 Separate state file
 Separate assigned agent
-Separate review status
 Separate merge status
 ```
 The conductor can run multiple loops at once.
@@ -590,37 +530,8 @@ Report any tests that could not be run
 ```
 Later, the conductor can add a second verification layer.
 Version 1 can rely on the coding agent’s report.
-However, the phase is not complete unless the coding agent reports that the required tests passed after all implementation and review fixes.
-14. Review model
-If CodeRabbit, Qodo, Codex review, or Copilot review leaves comments, the loop is.
-```text
-Review tool leaves comments
-
-Coding agent reads Qodo and CodeRabbit comments
-
-Coding agent reports the comments to GPT
-
-GPT decides which comments to fix or dismiss
-
-GPT creates the repair prompt
-
-Coding agent applies the fixes
-
-Coding agent reruns the required tests
-
-Coding agent reports the result to GPT
-
-GPT decides whether merge approval is allowed
-
-Loop continues
-```
-The user does not manually process review comments.
-The coding agent reads review comments.
-The coding agent reports them to GPT.
-GPT decides what matters.
-The coding agent applies GPT’s decisions.
-The coding agent reruns tests after review fixes.
-15. Phase review and merge model
+However, the phase is not complete unless the coding agent reports that the required tests passed after all implementation and repair fixes.
+14. Phase completion and merge model
 For every phase, the process is fixed.
 ```text
 1. GPT reads PLAN.md, BUILDING_REFERENCE.md, BUILD_LOG.md, STATE.json, and the latest coding-agent report
@@ -635,25 +546,13 @@ For every phase, the process is fixed.
 
 6. The coding agent opens or updates the PR
 
-7. Qodo and CodeRabbit review the PR
+7. If tests pass, GPT gives merge approval
 
-8. The coding agent reads the Qodo and CodeRabbit comments
+8. The coding agent performs the merge
 
-9. The coding agent reports the review comments to GPT
+9. The coding agent updates BUILD_LOG.md and STATE.json
 
-10. GPT decides which comments must be fixed, which are irrelevant, and what the next repair prompt should say
-
-11. The coding agent applies the review fixes
-
-12. The coding agent reruns the required tests after the review fixes
-
-13. If tests pass and the review comments are resolved or explicitly dismissed by GPT, GPT gives merge approval
-
-14. The coding agent performs the merge
-
-15. The coding agent updates BUILD_LOG.md and STATE.json
-
-16. GPT starts the next phase or next task
+10. GPT starts the next phase or next task
 ```
 The user does not merge manually.
 The conductor does not decide whether to merge.
@@ -664,15 +563,13 @@ A phase is complete only when all of the following are true.
 ```text
 The implementation matches PLAN.md
 The planned tests pass
-Qodo comments are resolved or explicitly dismissed by GPT
-CodeRabbit comments are resolved or explicitly dismissed by GPT
-The coding agent reruns tests after review fixes
+The coding agent reruns tests after fixes
 GPT gives explicit merge approval
 The coding agent merges
 BUILD_LOG.md and STATE.json are updated
 The next phase is started only after the merge
 ```
-16. Merge authority
+15. Merge authority
 Merge authority is split clearly.
 ```text
 GPT decides whether merge is allowed.
@@ -683,7 +580,7 @@ User does not merge manually.
 The coding agent should not merge before GPT gives explicit merge approval.
 GPT should not approve merge unless the phase gates are satisfied.
 The conductor should not independently decide that a merge is safe.
-17. When the user is contacted
+16. When the user is contacted
 The user should only be contacted for real manual blockers.
 Examples.
 ```text
@@ -722,7 +619,7 @@ Reply resume Kioku
 ```
 The notification should not ask the user to inspect normal coding details.
 It should only request the specific real-world action needed.
-18. Notifications
+17. Notifications
 Use Telegram first.
 Possible notification types.
 ```text
@@ -735,8 +632,6 @@ Usage limit reset
 Merge completed
 Tests failed repeatedly
 PR ready
-Review comments resolved
-Review loop stuck
 Container failed
 Agent failed
 Project paused
@@ -756,7 +651,7 @@ Blocked.
 Manual action needed.
 Create API key and add it to .env.
 ```
-19. Usage-limit handling
+18. Usage-limit handling
 The conductor tracks each agent separately.
 Example.
 ```text
@@ -777,7 +672,7 @@ It only pauses and resumes intelligently.
 The conductor should detect usage-limit messages dynamically where possible.
 The conductor should avoid starting new tasks on an agent close to its limit.
 The conductor should continue other projects with other agents when available.
-20. Agent assignment strategy
+19. Agent assignment strategy
 Use different agents for different project types.
 Claude Code
 Use for.
@@ -854,17 +749,7 @@ Quick web apps
 Standalone prototypes
 Hosted experiments
 ```
-CodeRabbit and Qodo
-Use for.
-```text
-PR review
-Security review
-Missing tests
-Code quality
-Logic issues
-Review gates before merge
-```
-21. Brain model strategy
+20. Brain model strategy
 The automated brain should use the strongest GPT reasoning model available through a proper programmatic interface.
 The goal is to make the automated GPT brain behave like the manual ChatGPT brain in the user’s current process.
 The automated system should not rely on fragile browser automation of ChatGPT chats.
@@ -876,7 +761,7 @@ Use GPT as the brain for each project loop.
 ```
 The user can still use ChatGPT manually for planning, high-level strategy, and improving PLAN.md.
 The automated loop should use a programmatic GPT brain for execution.
-22. Security and isolation rules
+21. Security and isolation rules
 The system should automate approvals only inside safe boundaries.
 Important rules.
 ```text
@@ -894,7 +779,7 @@ No phase should continue without passing its gates
 ```
 The point is not to make the system passive and dangerous.
 The point is to replace blind human approval with a controlled isolated environment.
-23. First version
+22. First version
 Version 1 should be simple.
 No complex website first.
 Build a terminal conductor.
@@ -925,7 +810,7 @@ Record merge result
 ```
 Version 1 does not need a fancy dashboard.
 Version 1 should prove the loop works.
-24. Later version
+23. Later version
 Version 2 can add a dashboard.
 Dashboard shows.
 ```text
@@ -939,7 +824,6 @@ Blocked or not
 Manual action needed
 Last merge
 Latest tests
-Review status
 Usage state
 Container status
 ```
@@ -964,7 +848,7 @@ Needs VPS manual action
 ```
 The dashboard should not be required for the first working version.
 It should only make supervision easier later.
-25. Final mental model
+24. Final mental model
 The final system is.
 ```text
 Henri
@@ -985,9 +869,6 @@ safe workrooms
 Tests
 quality gate
 
-Qodo and CodeRabbit
-reviewers
-
 GitHub
 paper trail
 
@@ -997,10 +878,9 @@ alarm system
 The user creates the direction.
 GPT decides the execution.
 Coding agents act.
-Review tools inspect.
 Containers isolate.
 The conductor keeps everything moving.
-26. Main principle
+25. Main principle
 The system should automate everything that is currently only blind copy paste.
 It should not automate the parts where the user actually thinks.
 The user keeps ownership of ideas, plans, and major direction.
@@ -1008,7 +888,7 @@ The system handles execution.
 The system should remove the need for the user to sit in front of the PC.
 The system should be able to run overnight.
 The system should only interrupt the user for true manual blockers.
-27. Final target
+26. Final target
 The final target is a personal AI software factory that can run multiple projects at once.
 It should allow this.
 ```text
@@ -1028,15 +908,7 @@ The coding agent reports results.
 
 GPT decides the next step.
 
-Review tools comment.
-
-The coding agent reads review comments.
-
-The coding agent reports review comments to GPT.
-
-GPT decides which review comments to fix or dismiss.
-
-The coding agent applies review fixes.
+The coding agent applies GPT’s repair instructions when needed.
 
 The coding agent reruns tests.
 
@@ -1046,12 +918,12 @@ The coding agent performs the merge.
 
 The user does not merge manually.
 
-The next phase starts only after the previous phase has passed tests, review, repair, retesting, GPT approval, and coding-agent merge.
+The next phase starts only after the previous phase has passed tests, repair, retesting, GPT approval, and coding-agent merge.
 
 The user is notified only for real manual actions.
 ```
 This is the system to build.
-28. Hephaestus build phases
+27. Hephaestus build phases
 This section defines how to build this system itself.
 The earlier sections describe the target system.
 This section turns the target system into a one-piece-at-a-time implementation roadmap.
@@ -1119,7 +991,6 @@ No coding-agent control
 No GitHub merging
 No Telegram
 No parallel projects
-No review-tool integration
 No real autonomous loop
 ```
 Required tests.
@@ -1165,7 +1036,6 @@ Read BUILD_LOG.md
 Read STATE.json
 Read CURRENT_TASK.md
 Read AGENT_OUTPUT.md if it exists
-Read REVIEW_NOTES.md if it exists
 Detect missing required files
 Detect malformed STATE.json
 Create normalized in-memory project-state object
@@ -1230,7 +1100,6 @@ No real coding-agent process
 No real terminal command execution
 No container runner
 No GitHub merge
-No review tool integration
 No Telegram notification unless needed for fatal failure
 ```
 Required tests.
@@ -1288,7 +1157,6 @@ What not to build yet.
 No real coding-agent automation
 No GPT-controlled shell
 No merge logic
-No review tools
 No parallel projects
 ```
 Required tests.
@@ -1346,7 +1214,6 @@ What not to build yet.
 ```text
 No multi-project execution
 No merge automation
-No review-tool ingestion
 No advanced dashboard
 No automatic phase advancement unless explicitly gated
 ```
@@ -1401,7 +1268,6 @@ Phase-completion blocker when tests are missing
 ```
 What not to build yet.
 ```text
-No review-tool enforcement
 No merge automation
 No multi-agent parallel execution
 No dashboard
@@ -1454,7 +1320,6 @@ Force-push protection by default
 What not to build yet.
 ```text
 No automatic merge
-No review-tool decision making
 No multi-project orchestration
 No production deployment
 ```
@@ -1486,70 +1351,16 @@ Stop if dirty-tree state is ignored.
 Stop if PR metadata is not recorded.
 Stop if force push is enabled by default.
 ```
-Phase 7: Review ingestion
+Phase 7: Merge gate
 Purpose.
 ```text
-Bring Qodo, CodeRabbit, Codex review, Copilot review, or other review comments into the loop.
-```
-What to build.
-```text
-Review fetch command
-Review note normalization
-REVIEW_NOTES.md update
-Duplicate-comment detection
-Resolved-comment tracking
-Unresolved-comment tracking
-Dismissed-comment tracking
-GPT review-decision request
-GPT review-decision storage
-Review-blocking status in STATE.json
-```
-What not to build yet.
-```text
-No automatic merge
-No automatic dismissal without GPT decision
-No public-comment-triggered privileged action
-No production deploy
-```
-Required tests.
-```text
-Review comments are imported
-Duplicate comments are ignored or linked
-Review comments are saved to REVIEW_NOTES.md
-Resolved comments are tracked
-Unresolved comments are tracked
-Dismissed comments require GPT decision
-Actionable comments can block merge
-Non-actionable comments can be dismissed by GPT
-Unresolved required comments block merge
-Review fetch failure becomes retryable or blocked state
-```
-Completion gate.
-```text
-Review comments enter the loop.
-GPT can decide which comments matter.
-The system can track resolved, unresolved, and dismissed review items.
-Merge remains impossible when required review items are unresolved.
-```
-Stop conditions.
-```text
-Stop if review comments are ignored.
-Stop if review comments can trigger privileged actions directly.
-Stop if comments are dismissed without GPT decision.
-Stop if unresolved required comments do not block merge.
-```
-Phase 8: Merge gate
-Purpose.
-```text
-Allow merge only after implementation, tests, reviews, retests, and GPT approval are all satisfied.
+Allow merge only after implementation, tests, retests, and GPT approval are all satisfied.
 ```
 What to build.
 ```text
 Merge-readiness checker
 Implementation status checker
 Required-test checker
-Review-resolution checker
-Retest-after-review checker
 GPT approval checker
 Dirty-tree checker
 Branch-status checker
@@ -1570,8 +1381,7 @@ Required tests.
 ```text
 Merge blocked without test evidence
 Merge blocked with failed tests
-Merge blocked with missing retest after review fixes
-Merge blocked with unresolved required review comments
+Merge blocked with missing retest after fixes
 Merge blocked without explicit GPT approval
 Merge blocked on dirty tree
 Merge blocked on wrong branch
@@ -1593,10 +1403,9 @@ Stop conditions.
 ```text
 Stop if merge can happen without GPT approval.
 Stop if failed or missing tests do not block merge.
-Stop if unresolved review comments do not block merge.
 Stop if next phase can begin before merge is recorded.
 ```
-Phase 9: Telegram notifications
+Phase 8: Telegram notifications
 Purpose.
 ```text
 Notify the user only for true blockers, important milestones, and required manual actions.
@@ -1646,7 +1455,7 @@ Stop if every log line creates a notification.
 Stop if notification failure crashes the project loop.
 Stop if blockers are not surfaced to the user.
 ```
-Phase 10: Multi-project parallel loops
+Phase 9: Multi-project parallel loops
 Purpose.
 ```text
 Run multiple independent projects safely without state contamination.
@@ -1661,7 +1470,6 @@ Independent logs per project
 Independent state files per project
 Independent prompt directories per project
 Independent test reports per project
-Independent review reports per project
 Project-level pause
 Project-level resume
 Project-level stop
@@ -1690,7 +1498,7 @@ Global status shows each project separately
 Completion gate.
 ```text
 Hephaestus can run multiple projects at once.
-Each project has isolated state, logs, prompts, test reports, review reports, container, and agent assignment.
+Each project has isolated state, logs, prompts, test reports, container, and agent assignment.
 A failure in one project does not corrupt or stop the others.
 ```
 Stop conditions.
@@ -1700,7 +1508,7 @@ Stop if state files cross-write.
 Stop if one project can access another project’s files.
 Stop if one usage limit pauses unrelated agents or unrelated projects.
 ```
-Phase 11: Dashboard after the terminal conductor works
+Phase 10: Dashboard after the terminal conductor works
 Purpose.
 ```text
 Add a dashboard only after the terminal conductor has proven the core loop.
@@ -1714,7 +1522,6 @@ Current task display
 Assigned agent display
 Container status display
 Test status display
-Review status display
 Merge status display
 Blocked/manual action display
 Latest notification display
@@ -1751,7 +1558,7 @@ Stop if dashboard becomes required for the conductor to work.
 Stop if dashboard exposes secrets.
 Stop if dashboard work delays the core automation loop before it is stable.
 ```
-29. Universal task template
+28. Universal task template
 Every coding-agent task should use the same basic structure.
 This prevents vague prompts.
 This prevents agents from doing too much.
@@ -1822,7 +1629,7 @@ The task is complete only if:
 ```
 The conductor should generate prompts in this shape whenever possible.
 GPT can customize the prompt, but should not remove the required tests, evidence, forbidden changes, stop conditions, or completion criteria.
-30. Universal phase gate checklist
+29. Universal phase gate checklist
 A phase is not complete because code exists.
 A phase is complete only when the gate passes.
 Universal phase gate.
@@ -1835,19 +1642,16 @@ Universal phase gate.
 6. Required tests passed.
 7. Test evidence was saved.
 8. If fixes were made, tests were rerun after the fixes.
-9. If review tools are active, review comments were imported.
-10. Required review comments were fixed or explicitly dismissed by GPT.
-11. If review fixes were made, tests were rerun after review fixes.
-12. GPT gave explicit merge approval.
-13. The coding agent merged only after GPT approval.
-14. BUILD_LOG.md was updated.
-15. STATE.json was updated.
-16. The next phase was not started before the merge was recorded.
+9. GPT gave explicit merge approval.
+10. The coding agent merged only after GPT approval.
+11. BUILD_LOG.md was updated.
+12. STATE.json was updated.
+13. The next phase was not started before the merge was recorded.
 ```
 If any item fails, the phase remains incomplete.
 If a gate cannot be evaluated, the phase remains incomplete.
 If an agent is unsure, it must report a blocker instead of guessing.
-31. Test categories required across the project
+30. Test categories required across the project
 Hephaestus needs multiple kinds of tests because it is not just a normal app.
 It is an automation system that can run agents, commands, containers, Git operations, and notifications.
 The test categories are these.
@@ -1863,7 +1667,6 @@ STATE.json validation
 Safe path resolution
 Prompt file naming
 Log appending
-Review-note parsing
 Notification formatting
 ```
 Integration tests
@@ -1876,7 +1679,6 @@ Examples.
 Read project state and create GPT request
 Receive mocked GPT decision and save prompt
 Run command in container and save report
-Fetch mocked review comments and update REVIEW_NOTES.md
 ```
 End-to-end tests
 Purpose.
@@ -1888,7 +1690,6 @@ Examples.
 One project, mocked GPT, mocked agent, task completed
 One project, mocked failure, blocker recorded
 One project, tests fail, repair loop triggered
-One project, review comment imported, repair required
 One project, all gates pass, merge allowed
 ```
 Sandbox and security tests
@@ -1917,7 +1718,6 @@ STATE.json schema
 Project registry schema
 Agent output schema
 Test report schema
-Review notes schema
 GPT decision schema
 Notification event schema
 ```
@@ -1945,7 +1745,6 @@ Coding agent crashes
 Container fails to start
 Test command times out
 GitHub unavailable
-Review tool unavailable
 Telegram unavailable
 Usage limit reached
 Malformed agent output
@@ -1964,9 +1763,6 @@ Run agent
 Capture output
 Run tests
 Open PR
-Import reviews
-Fix review comments
-Rerun tests
 Get GPT approval
 Merge
 Update state
@@ -1974,7 +1770,7 @@ Start next phase
 ```
 Golden-path tests are not enough by themselves.
 Failure-mode tests are mandatory because this system will often run without the user watching.
-32. Definition of done for Hephaestus phases
+31. Definition of done for Hephaestus phases
 A phase is done only when all required conditions are true.
 Definition of done.
 ```text
@@ -2002,12 +1798,11 @@ The implementation makes future phases harder.
 The implementation silently catches errors and continues.
 The implementation creates broad access to the host machine.
 ```
-33. Phase transition rules
+32. Phase transition rules
 The next phase may start only when the current phase is complete.
 Rules.
 ```text
 Do not start the next phase before tests pass.
-Do not start the next phase before required review comments are resolved or dismissed.
 Do not start the next phase before GPT gives explicit approval.
 Do not start the next phase before BUILD_LOG.md is updated.
 Do not start the next phase before STATE.json is updated.
@@ -2017,7 +1812,7 @@ Do not start the next phase if the current branch or PR state is unclear.
 ```
 If the coding agent accidentally implements part of a later phase, GPT must decide whether to keep, revert, or isolate the change.
 The conductor must not make that decision alone.
-34. First minimal version to actually build
+33. First minimal version to actually build
 The first useful version should not try to be the full software factory.
 The first useful version should prove the smallest safe loop.
 Minimum viable Hephaestus.
@@ -2041,7 +1836,6 @@ No dashboard
 No parallel projects
 No automatic GitHub merge
 No production deployment
-No complex review integrations
 No multi-agent scheduling
 No long-term analytics
 ```
@@ -2053,7 +1847,7 @@ Then prove that one project can merge safely.
 Then prove that multiple projects can run independently.
 Only then add dashboard and convenience features.
 ```
-35. Hephaestus anti-failure principles
+34. Hephaestus anti-failure principles
 The most dangerous failure is not that Hephaestus stops.
 The most dangerous failure is that Hephaestus continues when it should stop.
 Therefore the system should prefer safe blockage over blind progress.
@@ -2061,7 +1855,6 @@ Core anti-failure rules.
 ```text
 If state is unclear, block.
 If tests are missing, block.
-If review status is unclear, block.
 If merge readiness is unclear, block.
 If file boundaries are unclear, block.
 If required credentials are missing, block.
@@ -2077,7 +1870,6 @@ Examples of things that should not go to the user.
 Normal test failure
 Normal lint failure
 Normal type error
-Normal review comment
 Normal refactor decision inside the current plan
 Normal prompt repair
 Normal retry after agent crash
@@ -2098,7 +1890,7 @@ Possible data loss
 Repository corruption
 Unclear merge conflict
 ```
-36. Hephaestus quality standard
+35. Hephaestus quality standard
 Hephaestus should not be judged by how much code it writes.
 It should be judged by whether it reliably moves projects forward without destroying state, skipping tests, or bothering the user unnecessarily.
 The quality standard is this.
@@ -2109,7 +1901,6 @@ Exact logs
 Structured state
 Container isolation
 Command evidence
-Review evidence
 Retest evidence
 Explicit GPT approval
 Safe failure
@@ -2121,7 +1912,7 @@ No host-machine auto-approval
 If a proposed feature weakens any of these standards, it should be delayed or rejected.
 If a proposed shortcut makes the system look more autonomous but less verifiable, it should be rejected.
 If a proposed implementation cannot be tested, it should be redesigned until it can be tested.
-37. Final build order summary
+36. Final build order summary
 The build order is this.
 ```text
 0. Repository and safety skeleton
@@ -2131,11 +1922,10 @@ The build order is this.
 4. Single-agent execution loop
 5. Test-result verification
 6. Git branch and PR workflow
-7. Review ingestion
-8. Merge gate
-9. Telegram notifications
-10. Multi-project parallel loops
-11. Dashboard after the terminal conductor works
+7. Merge gate
+8. Telegram notifications
+9. Multi-project parallel loops
+10. Dashboard after the terminal conductor works
 ```
 Each step must be useful by itself.
 Each step must be tested before the next step starts.
@@ -2147,7 +1937,6 @@ Build Conductor controls movement and state.
 Coding agents execute.
 Containers isolate.
 Tests verify.
-Review tools inspect.
 Telegram alerts.
 Henri owns the direction.
 ```

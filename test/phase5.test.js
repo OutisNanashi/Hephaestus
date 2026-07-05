@@ -19,7 +19,7 @@ function nestedOpenaiResponse(value) { return async () => ({ ok: true, json: asy
 function project() {
   const directory = writableTemporaryDirectory("hephaestus-phase5-"); const root = path.join(directory, "projects"); const target = path.join(root, "demo"); fs.mkdirSync(target, { recursive: true });
   for (const [name, content] of Object.entries({ "PLAN.md": "# Demo\n", "BUILDING_REFERENCE.md": "# Reference\n", "BUILD_LOG.md": "# Build log\n", "CURRENT_TASK.md": "# Task\n", "src/greeting.js": "export function greeting() { return 'hello'; }\n", "test/greeting.test.js": "// greeting test\n" })) { fs.mkdirSync(path.dirname(path.join(target, name)), { recursive: true }); fs.writeFileSync(path.join(target, name), content); }
-  fs.writeFileSync(path.join(target, "STATE.json"), `${JSON.stringify({ currentPhase: "5", currentTask: "plan farewell", currentBranch: "main", currentPr: null, assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started", containerStatus: "not-started", lastGptDecision: null, nextAction: "brain" })}\n`);
+  fs.writeFileSync(path.join(target, "STATE.json"), `${JSON.stringify({ currentPhase: "5", currentTask: "plan farewell", currentBranch: "main", currentPr: null, assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false, lastSuccessfulStep: null, mergeStatus: "not-started", containerStatus: "not-started", lastGptDecision: null, nextAction: "brain" })}\n`);
   return { directory, root, target };
 }
 

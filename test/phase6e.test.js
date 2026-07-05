@@ -307,7 +307,7 @@ test("Step 6E does not enable real-agent execution; runAgentTask still rejects c
     fs.writeFileSync(path.join(projectPath, "STATE.json"), `${JSON.stringify({
       currentPhase: "6E", currentTask: "discovery", currentBranch: "main", currentPr: null,
       assignedAgent: null, attemptCount: 0, blocked: false, usageLimitPaused: false,
-      lastSuccessfulStep: null, reviewStatus: "not-started", mergeStatus: "not-started",
+      lastSuccessfulStep: null, mergeStatus: "not-started",
       containerStatus: "not-started", lastGptDecision: null, nextAction: "agent-run"
     }, null, 2)}\n`);
     fs.writeFileSync(path.join(projectPath, "out", "prompts", "next-task.md"), "# Prompt\n");
