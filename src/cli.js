@@ -35,11 +35,12 @@ import { saveState } from "./state.js";
 import { loadDashboardStatus } from "./dashboard.js";
 import { runLiveBrainCycle } from "./live-brain.js";
 import { runLiveLoop } from "./live-loop.js";
+import { AUTO_MERGE_MODE, finishRunLive, MANUAL_MERGE_MODE } from "./auto-merge.js";
 import { executeGithubMerge, fetchGithubMergeEvidence, openGithubPr, saveApproval } from "./github-workflow.js";
 import { requestMergeApproval } from "./merge-approval.js";
 import { verifyTestEvidence as verifyTestEvidenceStatus } from "./test-gate.js";
 
-const HELP = `Hephaestus Phase 9\n\nUsage:\n  hephaestus --help\n  hephaestus status [--config <file>]\n  hephaestus pause --project <id> [--config <file>]\n  hephaestus resume --project <id> [--config <file>]\n  hephaestus stop --project <id> [--config <file>]\n  hephaestus run --mock-gpt <fixture> --mock-agent-output <fixture> [--config <file>]\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus live-brain [--config <file>] [--project <id>] [--task <task>]\n  hephaestus run-live --project <id> [--task <task>] [--max-cycles <n>]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus agent-preflight --adapter <id>\n  hephaestus agent-run-plan --project <id> --adapter <id> --prompt <relative-file>\n  hephaestus agent-smoke --project <id> --adapter codex\n  hephaestus agent-codex-exec --project <id> --prompt <relative-file>\n  hephaestus agent-discover --adapter codex\n  hephaestus agent-codex-readonly-smoke --project <id>\n  hephaestus agent-codex-readonly-inspect --project <id>\n  hephaestus agent-codex-readonly-inspect-record --project <id>\n  hephaestus agent-codex-readonly-prompt-record --project <id>\n  hephaestus activation-clean-fixture-artifacts --project <id>\n  hephaestus activation-closeout-readonly-codex --project <id> [--write-report]\n  hephaestus activation-mocked-brain-readonly-handoff --project <id>\n  hephaestus activation-provider-brain-readonly-handoff --project <id>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus pr-open --project <id> --provider github [--message <title>]\n  hephaestus merge-approve --project <id>\n  hephaestus merge-execute --project <id>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge-check --project <id> [--fixture <fixture-name>]\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n  hephaestus notify send <project-name> --fixture <fixture-name>\n\nCommands:\n  status        List each registered project without mutating state or starting work.\n  pause         Pause only the named project by writing its own STATE.json; other projects are untouched.\n  resume        Resume only the named project by writing its own STATE.json; other projects are untouched.\n  stop          Stop only the named project by writing its own STATE.json; other projects are untouched.\n  run           Run one independent mocked loop per eligible registered project; skips paused/stopped and isolates per-project failures.\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  live-brain    Run one live configured brain call and save a bounded prompt; never runs an agent.\n  run-live      Run the continuous brain-to-Codex loop for one project until task-complete, blocked, paused, or the cycle budget ends.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  agent-preflight Inspect an adapter without sending a prompt; real adapters cannot execute tasks.\n  agent-run-plan Build a dry-run, secret-free run plan; real-agent execution stays blocked.\n  agent-codex-exec Run one real Codex task with writes confined to the selected project (workspace-write sandbox, approvals off, bypass flags rejected).\n  agent-smoke   Run the hardcoded Codex read-only smoke probe; never sends a project prompt.\n  agent-discover Discover whether Codex CLI documents a safe non-interactive prompt contract.\n  agent-codex-readonly-smoke Run one real Codex exec --sandbox read-only smoke; no project prompt and no writes.\n  agent-codex-readonly-inspect Run one real Codex read-only fixture inspection that emits a structured Step 6G report; no writes.\n  agent-codex-readonly-inspect-record Persist a validated Step 6G read-only Codex inspection as controlled project-local AGENT_OUTPUT.md plus out/agent_outputs/<step-6h>.json; Codex never writes files.\n  agent-codex-readonly-prompt-record Write a controlled Step 6I prompt artifact, read it back, hand off to Codex read-only exec, and persist the validated result.\n  activation-clean-fixture-artifacts Delete only the strictly whitelisted Step 6H/6I activation artifacts under the registered project.\n  activation-closeout-readonly-codex Audit Step 6F-6J read-only Codex activation chain; never runs real Codex; optional --write-report persists a project-local closeout report.\n  activation-mocked-brain-readonly-handoff Generate a controlled mocked brain decision, derive a read-only Codex prompt, hand off, validate, and persist controlled artifacts. No real GPT.\n  activation-provider-brain-readonly-handoff Same as mocked handoff, but decision comes from a formal offline provider interface. No real GPT.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Open/update a PR: --provider fixture-pr records a local fixture; --provider github opens a real PR via the gh CLI (merge stays blocked).\n  merge-approve Fetch real PR and test evidence, ask the GPT brain for a scoped merge verdict, and store the approval; never merges.\n  merge-execute Re-check every merge gate against live GitHub evidence and the stored GPT approval, then perform the real PR merge and record the result.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge-check   Evaluate a project's local merge evidence (merge-inbox/mocked.json by default); never merges.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n  notify send   Send exactly one notification fixture via the configured Telegram transport; redacts secrets and writes a project-local report.\n\nSafety:\n  Project status is read-only. Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Live brain calls save prompts only and never run coding agents. Merge commands never perform a merge. Notification rendering never contacts Telegram.`;
+const HELP = `Hephaestus Phase 9\n\nUsage:\n  hephaestus --help\n  hephaestus status [--config <file>]\n  hephaestus pause --project <id> [--config <file>]\n  hephaestus resume --project <id> [--config <file>]\n  hephaestus stop --project <id> [--config <file>]\n  hephaestus run --mock-gpt <fixture> --mock-agent-output <fixture> [--config <file>]\n  hephaestus validate [--config <file>] [--project <id>]\n  hephaestus inspect [--config <file>] [--project <id>] [--save-report]\n  hephaestus live-brain [--config <file>] [--project <id>] [--task <task>]\n  hephaestus run-live --project <id> [--task <task>] [--max-cycles <n>] [--manual-merge|--auto-merge]\n  hephaestus cycle --project <id> --mock-gpt <fixture> --mock-agent-output <fixture>\n  hephaestus sandbox-run --project <id> --command <allowlisted-id>\n  hephaestus agent-run --project <id> --adapter <fixture-agent> --prompt <relative-file>\n  hephaestus agent-preflight --adapter <id>\n  hephaestus agent-run-plan --project <id> --adapter <id> --prompt <relative-file>\n  hephaestus agent-smoke --project <id> --adapter codex\n  hephaestus agent-codex-exec --project <id> --prompt <relative-file>\n  hephaestus agent-discover --adapter codex\n  hephaestus agent-codex-readonly-smoke --project <id>\n  hephaestus agent-codex-readonly-inspect --project <id>\n  hephaestus agent-codex-readonly-inspect-record --project <id>\n  hephaestus agent-codex-readonly-prompt-record --project <id>\n  hephaestus activation-clean-fixture-artifacts --project <id>\n  hephaestus activation-closeout-readonly-codex --project <id> [--write-report]\n  hephaestus activation-mocked-brain-readonly-handoff --project <id>\n  hephaestus activation-provider-brain-readonly-handoff --project <id>\n  hephaestus verify-tests [--config <file>] [--project <id>]\n  hephaestus git-branch --project <id> --task <task-id>\n  hephaestus git-commit --project <id> --message <message>\n  hephaestus pr-open --project <id> --provider fixture-pr --task <task-id>\n  hephaestus pr-open --project <id> --provider github [--message <title>]\n  hephaestus merge-approve --project <id>\n  hephaestus merge-execute --project <id>\n  hephaestus merge check <project-name> --fixture <fixture-name>\n  hephaestus merge-check --project <id> [--fixture <fixture-name>]\n  hephaestus merge relay <project-name> --fixture <fixture-name>\n  hephaestus notify render <project-name> --fixture <fixture-name>\n  hephaestus notify send <project-name> --fixture <fixture-name>\n\nCommands:\n  status        List each registered project without mutating state or starting work.\n  pause         Pause only the named project by writing its own STATE.json; other projects are untouched.\n  resume        Resume only the named project by writing its own STATE.json; other projects are untouched.\n  stop          Stop only the named project by writing its own STATE.json; other projects are untouched.\n  run           Run one independent mocked loop per eligible registered project; skips paused/stopped and isolates per-project failures.\n  validate      Validate one registered project and create its log directory.\n  inspect       Read and summarize one registered project without changing it.\n  live-brain    Run one live configured brain call and save a bounded prompt; never runs an agent.\n  run-live      Manual-merge Mode by default: run the continuous brain-to-Codex loop without PR/approval/merge; --auto-merge enables Auto-merge Mode after task-complete only.\n  cycle         Run one local mocked brain cycle using declared fixture files.\n  sandbox-run   Run one fixed allowlisted command in an isolated container.\n  agent-run     Run one fixture agent process inside the isolated container.\n  agent-preflight Inspect an adapter without sending a prompt; real adapters cannot execute tasks.\n  agent-run-plan Build a dry-run, secret-free run plan; real-agent execution stays blocked.\n  agent-codex-exec Run one real Codex task with writes confined to the selected project (workspace-write sandbox, approvals off, bypass flags rejected).\n  agent-smoke   Run the hardcoded Codex read-only smoke probe; never sends a project prompt.\n  agent-discover Discover whether Codex CLI documents a safe non-interactive prompt contract.\n  agent-codex-readonly-smoke Run one real Codex exec --sandbox read-only smoke; no project prompt and no writes.\n  agent-codex-readonly-inspect Run one real Codex read-only fixture inspection that emits a structured Step 6G report; no writes.\n  agent-codex-readonly-inspect-record Persist a validated Step 6G read-only Codex inspection as controlled project-local AGENT_OUTPUT.md plus out/agent_outputs/<step-6h>.json; Codex never writes files.\n  agent-codex-readonly-prompt-record Write a controlled Step 6I prompt artifact, read it back, hand off to Codex read-only exec, and persist the validated result.\n  activation-clean-fixture-artifacts Delete only the strictly whitelisted Step 6H/6I activation artifacts under the registered project.\n  activation-closeout-readonly-codex Audit Step 6F-6J read-only Codex activation chain; never runs real Codex; optional --write-report persists a project-local closeout report.\n  activation-mocked-brain-readonly-handoff Generate a controlled mocked brain decision, derive a read-only Codex prompt, hand off, validate, and persist controlled artifacts. No real GPT.\n  activation-provider-brain-readonly-handoff Same as mocked handoff, but decision comes from a formal offline provider interface. No real GPT.\n  verify-tests  Verify the project's recorded test evidence against the declaration.\n  git-branch    Create a deterministic per-task Git branch in the project repo.\n  git-commit    Commit pending project changes with a task-scoped message.\n  pr-open       Open/update a PR: --provider fixture-pr records a local fixture; --provider github opens a real PR via the gh CLI (merge stays blocked).\n  merge-approve Fetch real PR and test evidence, ask the GPT brain for a scoped merge verdict, and store the approval; never merges.\n  merge-execute Re-check every merge gate against live GitHub evidence and the stored GPT approval, then perform the real PR merge and record the result.\n  merge check   Evaluate local structured merge evidence and save a readiness report.\n  merge-check   Evaluate a project's local merge evidence (merge-inbox/mocked.json by default); never merges.\n  merge relay   Emit a non-executing merge relay only when readiness is allowed.\n  notify render Render one local notification fixture without sending a message.\n  notify send   Send exactly one notification fixture via the configured Telegram transport; redacts secrets and writes a project-local report.\n\nSafety:\n  Project status is read-only. Agent prompts must stay inside the selected project. Fixture agents run only through the sandbox. Live brain calls save prompts only and never run coding agents. Manual-merge Mode leaves pr-open, merge-approve, and merge-execute separate; Auto-merge Mode runs them only after task-complete with GPT approval and merge gates intact. Notification rendering never contacts Telegram.`;
 
 const DASHBOARD_HELP = HELP
   .replace("Hephaestus Phase 9", "Hephaestus Phase 10")
@@ -73,6 +74,8 @@ function parseArguments(argv) {
   let provider;
   let fixturePath;
   let maxCycles;
+  let autoMerge = false;
+  let manualMerge = false;
   const command = args.shift();
   const mergeSubcommand = command === "merge" ? args.shift() : undefined;
   const notifySubcommand = command === "notify" ? args.shift() : undefined;
@@ -95,6 +98,8 @@ function parseArguments(argv) {
     else if (option === "--message") message = takeOptionValue(args, option);
     else if (option === "--provider") provider = takeOptionValue(args, option);
     else if (option === "--fixture") fixturePath = takeOptionValue(args, option);
+    else if (option === "--auto-merge") autoMerge = true;
+    else if (option === "--manual-merge") manualMerge = true;
     else if (option === "--max-cycles") {
       const value = Number(takeOptionValue(args, option));
       if (!Number.isSafeInteger(value) || value < 1) throw new HephaestusError("Option --max-cycles requires a positive integer.", "INVALID_ARGUMENT");
@@ -102,7 +107,8 @@ function parseArguments(argv) {
     }
     else throw new HephaestusError(`Unknown option: ${option}.`, "INVALID_ARGUMENT");
   }
-  return { command, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath, maxCycles };
+  if (autoMerge && manualMerge) throw new HephaestusError("Options --auto-merge and --manual-merge cannot be used together.", "INVALID_ARGUMENT");
+  return { command, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath, maxCycles, autoMerge, manualMerge };
 }
 
 function mergeFixture(allowedRoot, fixturePath) {
@@ -147,6 +153,15 @@ function notificationFixture(allowedRoot, fixturePath) {
   return parsed;
 }
 
+function loopOutput(loop) {
+  return {
+    status: loop.status,
+    reason: loop.reason,
+    cycles: loop.cycles.map((cycle) => ({ cycle: cycle.cycle, loopSignal: cycle.decision.loopSignal, nextAction: cycle.decision.nextAction, execClassification: cycle.execClassification })),
+    notification: loop.notification
+  };
+}
+
 export const KNOWN_COMMANDS = Object.freeze([
   "status", "dashboard", "validate", "inspect", "live-brain", "run-live", "cycle", "sandbox-run",
   "agent-run", "agent-preflight", "agent-run-plan", "agent-smoke", "agent-discover", "agent-codex-exec",
@@ -161,7 +176,7 @@ export const KNOWN_COMMANDS = Object.freeze([
 const LIFECYCLE_ACTIONS = Object.freeze(["pause", "resume", "stop"]);
 
 function runInternal(argv, handlers = {}) {
-  const { command, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath, maxCycles } = parseArguments(argv);
+  const { command, mergeSubcommand, mergeProjectId, notifySubcommand, notifyProjectId, configPath, projectId, saveReport, mockGptPath, mockAgentOutputPath, commandId, adapterId, promptPath, task, message, provider, fixturePath, maxCycles, autoMerge, manualMerge } = parseArguments(argv);
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
     process.stdout.write(`${DASHBOARD_HELP}\n`);
     return 0;
@@ -170,6 +185,7 @@ function runInternal(argv, handlers = {}) {
   const notifyRender = command === "notify" && notifySubcommand === "render";
   const notifySend = command === "notify" && notifySubcommand === "send";
   if (!KNOWN_COMMANDS.includes(command) && !mergeCommand && !notifyRender && !notifySend) throw new HephaestusError(`Unknown command: ${command}.`, "INVALID_ARGUMENT");
+  if (command !== "run-live" && (autoMerge || manualMerge)) throw new HephaestusError("--auto-merge and --manual-merge only apply to run-live.", "INVALID_ARGUMENT");
 
   if (command === "agent-discover") {
     if (adapterId !== undefined && adapterId !== "codex") throw new HephaestusError("agent-discover only supports --adapter codex.", "INVALID_ARGUMENT");
@@ -284,7 +300,7 @@ function runInternal(argv, handlers = {}) {
 
   if (command === "run-live") {
     if (typeof handlers.liveLoop !== "function") throw new HephaestusError("run-live requires the async CLI runner.", "INVALID_ARGUMENT");
-    return handlers.liveLoop({ config, project, task, maxCycles });
+    return handlers.liveLoop({ config, project, task, maxCycles, mergeMode: autoMerge ? AUTO_MERGE_MODE : MANUAL_MERGE_MODE });
   }
 
   if (command === "cycle") {
@@ -568,7 +584,7 @@ export async function runAsync(argv) {
       }, null, 2)}\n`);
       return 0;
     },
-    liveLoop: async ({ config, project, task, maxCycles }) => {
+    liveLoop: async ({ config, project, task, maxCycles, mergeMode }) => {
       const loop = await runLiveLoop({
         allowedRoot: config.allowedRoot,
         projectPath: project.path,
@@ -578,13 +594,16 @@ export async function runAsync(argv) {
         ...(maxCycles === undefined ? {} : { maxCycles }),
         telegram: config.notifications?.telegram
       });
+      const result = await finishRunLive({ mode: mergeMode, config, project, loop });
       process.stdout.write(`${JSON.stringify({
-        status: loop.status,
-        reason: loop.reason,
-        cycles: loop.cycles.map((cycle) => ({ cycle: cycle.cycle, loopSignal: cycle.decision.loopSignal, nextAction: cycle.decision.nextAction, execClassification: cycle.execClassification })),
-        notification: loop.notification
+        mode: result.mode,
+        autoMerge: result.autoMerge,
+        mergePipeline: result.mergePipeline,
+        ...loopOutput(result.loop),
+        merge: result.merge ?? null
       }, null, 2)}\n`);
-      return loop.status === "task-complete" ? 0 : 1;
+      if (result.mode === MANUAL_MERGE_MODE) return loop.status === "task-complete" ? 0 : 1;
+      return result.merge?.merged === true ? 0 : 1;
     },
     mergeApprove: async ({ config, project, validated }) => {
       const apiKey = process.env.OPENAI_API_KEY;

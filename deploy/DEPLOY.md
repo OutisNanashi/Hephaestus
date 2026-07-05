@@ -79,6 +79,18 @@ One supervised burst (up to 5 brain/agent cycles):
 node src/cli.js run-live --config hephaestus.vps.config.json --project <id>
 ```
 
+This is **Manual-merge Mode**, the default. It runs the live worker loop and
+does not open/update a PR, request GPT merge approval, or execute a merge.
+To opt into **Auto-merge Mode** for a finished task:
+
+```sh
+node src/cli.js run-live --config hephaestus.vps.config.json --project <id> --auto-merge
+```
+
+Auto-merge Mode runs the existing `pr-open`, `merge-approve`, and
+`merge-execute` path only after exact `task-complete`; GPT approval and merge
+gates still decide whether anything merges.
+
 Unattended, via systemd (one timer per project):
 
 ```sh
@@ -92,6 +104,8 @@ immediately without doing anything, and each terminal event notifies Telegram
 exactly once (deduplicated across runs).
 
 ## 7. Merging a finished task
+
+The manual chain remains available:
 
 ```sh
 node src/cli.js pr-open --config hephaestus.vps.config.json --project <id> --provider github
