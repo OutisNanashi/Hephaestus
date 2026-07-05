@@ -30,7 +30,7 @@ function outputText(payload) {
   return parts.length > 0 ? parts.join("\n") : null;
 }
 
-const STRICT_JSON_SUFFIX = "\n\nRespond with ONLY one valid JSON object with exactly these keys: nextAction, rationale, allowedFiles, requiredTests, stopConditions. No markdown, no code fences, no commentary.";
+const DECISION_JSON_SUFFIX = "\n\nRespond with ONLY one valid JSON object with exactly these keys: nextAction, rationale, allowedFiles, requiredTests, stopConditions, and optionally loopSignal. No markdown, no code fences, no commentary.";
 
 // Tolerate models that wrap JSON in ```json fences or add surrounding prose; validation itself is never relaxed.
 function extractJsonText(raw) {
@@ -43,8 +43,8 @@ function extractJsonText(raw) {
   return first !== -1 && last > first ? text.slice(first, last + 1) : text;
 }
 
-// Returns a validated decision or null; null means "invalid, worth one stricter retry". Never accepts malformed output.
-function parseDecision(rawText) {
+// Returns a validated object or null; null means "invalid, worth one stricter retry". Never accepts malformed output.
+function parseWith(validate, rawText) {
   if (typeof rawText !== "string" || rawText.trim() === "") return null;
   let parsed;
   try {
@@ -53,7 +53,7 @@ function parseDecision(rawText) {
     return null;
   }
   try {
-    return validateOpenAIDecision(parsed);
+    return validate(parsed);
   } catch {
     return null;
   }
@@ -85,16 +85,22 @@ async function requestOutputText({ key, model, prompt, fetchImpl, sleepImpl }) {
   }
 }
 
-export async function requestOpenAIDecision({ apiKey, model, input, fetchImpl = globalThis.fetch, sleepImpl = (delay) => new Promise((resolve) => setTimeout(resolve, delay)) }) {
+/** Request one strictly validated JSON object from OpenAI, with a single stricter retry. */
+export async function requestOpenAIStructured({ apiKey, model, input, validate, strictSuffix = DECISION_JSON_SUFFIX, failureCode = "INVALID_OPENAI_DECISION", fetchImpl = globalThis.fetch, sleepImpl = (delay) => new Promise((resolve) => setTimeout(resolve, delay)) }) {
   const key = text(apiKey, "OpenAI API key", "OPENAI_API_KEY_MISSING");
   const selectedModel = text(model, "OpenAI model", "INVALID_OPENAI_CONFIG");
   const prompt = text(input, "OpenAI input", "INVALID_OPENAI_INPUT");
   if (typeof fetchImpl !== "function") fail("OpenAI fetch implementation is unavailable.", "OPENAI_PROVIDER_FAILED");
+  if (typeof validate !== "function") fail("OpenAI structured request requires a validator.", "OPENAI_PROVIDER_FAILED");
 
-  const first = parseDecision(await requestOutputText({ key, model: selectedModel, prompt, fetchImpl, sleepImpl }));
+  const first = parseWith(validate, await requestOutputText({ key, model: selectedModel, prompt, fetchImpl, sleepImpl }));
   if (first !== null) return first;
   // One narrow retry with a stricter JSON-only instruction; validation stays strict, malformed output is still rejected.
-  const retry = parseDecision(await requestOutputText({ key, model: selectedModel, prompt: `${prompt}${STRICT_JSON_SUFFIX}`, fetchImpl, sleepImpl }));
+  const retry = parseWith(validate, await requestOutputText({ key, model: selectedModel, prompt: `${prompt}${strictSuffix}`, fetchImpl, sleepImpl }));
   if (retry !== null) return retry;
-  fail("OpenAI response text was not valid decision JSON.", "INVALID_OPENAI_DECISION");
+  fail("OpenAI response text was not valid JSON for this request.", failureCode);
+}
+
+export async function requestOpenAIDecision(options) {
+  return requestOpenAIStructured({ ...options, validate: validateOpenAIDecision, failureCode: "INVALID_OPENAI_DECISION" });
 }

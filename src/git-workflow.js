@@ -16,7 +16,7 @@ function gitSlug(value) {
   return value.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
 }
 
-function git(repo, args) {
+export function git(repo, args) {
   const r = spawnSync("git", args, {
     cwd: repo,
     encoding: "utf8",
