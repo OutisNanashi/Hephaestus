@@ -11,7 +11,7 @@ import { saveState } from "./state.js";
 const MAX_ATTEMPTS = 3;
 const OUTPUT_SUMMARY_LIMIT = 240;
 
-function safePromptPath({ allowedRoot, projectPath, promptPath }) {
+export function safePromptPath({ allowedRoot, projectPath, promptPath }) {
   if (typeof promptPath !== "string" || promptPath.length === 0 || promptPath.split(/[\\/]+/u).includes("..")) {
     fail("Agent prompt path must be a non-empty relative path without traversal.", "INVALID_AGENT_PROMPT_PATH");
   }
@@ -31,7 +31,7 @@ function writableProjectFile(projectPath, name) {
   return target;
 }
 
-function appendLog(projectPath, line) {
+export function appendLog(projectPath, line) {
   fs.appendFileSync(writableProjectFile(projectPath, "BUILD_LOG.md"), `\n${line}\n`, "utf8");
 }
 
@@ -51,13 +51,13 @@ function ensureAgentRunDirectory(projectPath) {
   return currentDirectory;
 }
 
-function readPrompt(promptPath) {
+export function readPrompt(promptPath) {
   const prompt = fs.readFileSync(promptPath, "utf8");
   if (prompt.trim() === "") fail("Agent prompt must not be empty.", "EMPTY_AGENT_PROMPT");
   return prompt;
 }
 
-function deliverPrompt(projectPath, prompt) {
+export function deliverPrompt(projectPath, prompt) {
   const runDirectory = ensureAgentRunDirectory(projectPath);
   const deliveredPromptPath = path.join(runDirectory, "prompt.md");
   if (fs.existsSync(deliveredPromptPath)) assertRealPathWithinRoot(projectPath, deliveredPromptPath);
@@ -71,7 +71,7 @@ function summarize(stdout, stderr) {
   return text.length > OUTPUT_SUMMARY_LIMIT ? `${text.slice(0, OUTPUT_SUMMARY_LIMIT)}...` : text;
 }
 
-function agentDetails({ request, status, exitCode, startedAt, finishedAt, outputPath, outputSummary, usageLimitDetected, blockerDetected, errorCategory }) {
+export function agentDetails({ request, status, exitCode, startedAt, finishedAt, outputPath, outputSummary, usageLimitDetected, blockerDetected, errorCategory }) {
   return Object.freeze({
     lastRunId: request.runId,
     adapterId: request.adapterId,
@@ -88,7 +88,7 @@ function agentDetails({ request, status, exitCode, startedAt, finishedAt, output
   });
 }
 
-function stateForRunning(state, request, startedAt) {
+export function stateForRunning(state, request, startedAt) {
   if (state.nextAction === "agent-running") fail("The current task is already running.", "AGENT_TASK_ALREADY_RUNNING");
   if (state.usageLimitPaused || state.blocked) fail("The current project state is blocked or paused.", "AGENT_STATE_NOT_RUNNABLE");
   if (state.attemptCount >= MAX_ATTEMPTS) fail("Agent retry limit has been reached.", "AGENT_RETRY_LIMIT_REACHED");
@@ -110,15 +110,15 @@ function stateForRunning(state, request, startedAt) {
   };
 }
 
-function completedState(state, agent) {
+export function completedState(state, agent) {
   return { ...state, blocked: false, usageLimitPaused: false, nextAction: "agent-completed", lastSuccessfulStep: "agent-run", agent };
 }
 
-function failedState(state, nextAction, agent) {
+export function failedState(state, nextAction, agent) {
   return { ...state, blocked: true, usageLimitPaused: false, attemptCount: state.attemptCount + 1, nextAction, agent };
 }
 
-function pausedState(state, agent) {
+export function pausedState(state, agent) {
   return { ...state, blocked: false, usageLimitPaused: true, nextAction: "agent-usage-limit-paused", agent };
 }
 
@@ -137,7 +137,7 @@ function markdownBlock(value) {
   return value.trim() === "" ? "(empty)" : value;
 }
 
-function writeAgentOutput(projectPath, result) {
+export function writeAgentOutput(projectPath, result) {
   const destination = writableProjectFile(projectPath, "AGENT_OUTPUT.md");
   const content = `# Agent Output
 
