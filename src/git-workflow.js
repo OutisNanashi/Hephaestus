@@ -39,6 +39,9 @@ export function assertCleanTree(repo) { if(git(repo,["status","--porcelain"])!==
 export function currentGitBranch(repo) { return git(repo,["branch","--show-current"]); }
 export function hasPendingChanges(repo) { return git(repo,["status","--porcelain"]) !== ""; }
 export function createTaskBranch(repo, projectId, task) { assertCleanTree(repo); const branch=taskBranchName(projectId,task); git(repo,["switch","-c",branch]); return branch; }
+// Create the task branch, or reset a stale one from an interrupted run to the
+// current (base) HEAD. `switch -C` makes re-running an automated build safe.
+export function ensureFreshTaskBranch(repo, projectId, task) { assertCleanTree(repo); const branch=taskBranchName(projectId,task); git(repo,["switch","-C",branch]); return branch; }
 // Return to the base branch for a new phase: fetch the merged result, force-check
 // out base (discarding only leftover conductor churn from the finished phase),
 // and fast-forward. --ff-only fails loudly if base diverged, which is a real blocker.
