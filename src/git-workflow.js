@@ -38,6 +38,16 @@ export function taskBranchName(projectId, task) {
 export function assertCleanTree(repo) { if(git(repo,["status","--porcelain"])!=="") fail("Git worktree is dirty.","GIT_DIRTY_TREE"); }
 export function hasPendingChanges(repo) { return git(repo,["status","--porcelain"]) !== ""; }
 export function createTaskBranch(repo, projectId, task) { assertCleanTree(repo); const branch=taskBranchName(projectId,task); git(repo,["switch","-c",branch]); return branch; }
+// Return to the base branch for a new phase: fetch the merged result, force-check
+// out base (discarding only leftover conductor churn from the finished phase),
+// and fast-forward. --ff-only fails loudly if base diverged, which is a real blocker.
+export function resetToBase(repo, base = "master") {
+  if (!gitSlug(base)) fail("Base branch identity is required.", "INVALID_GIT_TASK");
+  git(repo, ["fetch", "origin", base]);
+  git(repo, ["checkout", "-f", base]);
+  git(repo, ["pull", "--ff-only", "origin", base]);
+  return base;
+}
 export function commitTask(repo, message) { if(git(repo,["status","--porcelain"])==="") fail("Empty commits are forbidden.","EMPTY_GIT_COMMIT"); git(repo,["add","-A"]); git(repo,["commit","-m",message]); return Object.freeze({ hash:git(repo,["rev-parse","HEAD"]), branch:git(repo,["branch","--show-current"]), message }); }
 export function fixturePr(projectId, task, existing=null) {
   const branch = taskBranchName(projectId, task);
