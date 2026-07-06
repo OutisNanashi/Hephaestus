@@ -36,6 +36,7 @@ export function taskBranchName(projectId, task) {
   return `hephaestus/${gitSlug(projectId)}/${gitSlug(task)}`;
 }
 export function assertCleanTree(repo) { if(git(repo,["status","--porcelain"])!=="") fail("Git worktree is dirty.","GIT_DIRTY_TREE"); }
+export function currentGitBranch(repo) { return git(repo,["branch","--show-current"]); }
 export function hasPendingChanges(repo) { return git(repo,["status","--porcelain"]) !== ""; }
 export function createTaskBranch(repo, projectId, task) { assertCleanTree(repo); const branch=taskBranchName(projectId,task); git(repo,["switch","-c",branch]); return branch; }
 // Return to the base branch for a new phase: fetch the merged result, force-check

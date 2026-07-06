@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fail } from "./errors.js";
-import { createTaskBranch, resetToBase } from "./git-workflow.js";
+import { createTaskBranch, currentGitBranch, resetToBase } from "./git-workflow.js";
 import { requestNextPhasePlan } from "./phase-plan.js";
 import { validateProjectDirectory } from "./project.js";
 import { assertRealPathWithinRoot } from "./safe-path.js";
@@ -57,6 +57,20 @@ function completedState(previous, rationale) {
     lastSuccessfulStep: `phase-${previous.currentPhase}-merged`,
     lastGptDecision: JSON.stringify({ phasePlan: { status: "all-complete", rationale } }).slice(0, 500)
   };
+}
+
+/**
+ * Ensure the project sits on a task branch before a build, creating one for the
+ * current task if it is still on the base branch (the fresh-clone / first-phase
+ * case). A no-op once a phase branch exists, so it is safe to call every phase.
+ */
+export function ensureTaskBranch({ allowedRoot, projectPath, projectId, base = "master" }) {
+  const validated = validateProjectDirectory(allowedRoot, projectPath);
+  const current = currentGitBranch(validated.path);
+  if (current !== base) return Object.freeze({ created: false, branch: current });
+  const branch = createTaskBranch(validated.path, projectId, validated.state.currentTask);
+  saveState(validated.path, { ...validated.state, currentBranch: branch });
+  return Object.freeze({ created: true, branch });
 }
 
 /**

@@ -1,7 +1,7 @@
 import { fail } from "./errors.js";
 import { AUTO_MERGE_MODE, finishRunLive, MANUAL_MERGE_MODE } from "./auto-merge.js";
 import { runLiveLoop } from "./live-loop.js";
-import { advanceToNextPhase } from "./phase-transition.js";
+import { advanceToNextPhase, ensureTaskBranch } from "./phase-transition.js";
 import { validateProjectDirectory } from "./project.js";
 
 // A single run advances at most this many phases, so a confused brain can never
@@ -14,6 +14,7 @@ function currentPhaseMerged(state) {
 
 const DEFAULT_DEPS = Object.freeze({
   readState: ({ config, project }) => validateProjectDirectory(config.allowedRoot, project.path).state,
+  prepareBranch: ({ config, project }) => ensureTaskBranch({ allowedRoot: config.allowedRoot, projectPath: project.path, projectId: project.id }),
   runLiveLoop: (args) => runLiveLoop(args),
   autoMerge: (args) => finishRunLive({ mode: AUTO_MERGE_MODE, ...args }),
   advance: ({ config, project }) => advanceToNextPhase({ allowedRoot: config.allowedRoot, projectPath: project.path, projectId: project.id, brain: config.brain })
@@ -72,6 +73,9 @@ export async function orchestrateRunLive({ mode = MANUAL_MERGE_MODE, config, pro
     }
     builtTasks.add(state.currentTask);
 
+    // First phase off a fresh clone starts on the base branch; give it a task
+    // branch so the build commits and the PR have somewhere to go.
+    deps.prepareBranch({ config, project });
     const loop = await deps.runLiveLoop(loopArgs({ config, project, task: firstPhase ? task : undefined, maxCycles }));
     firstPhase = false;
     if (loop.status !== "task-complete") {

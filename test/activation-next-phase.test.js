@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { HephaestusError } from "../src/errors.js";
 import { requestNextPhasePlan } from "../src/phase-plan.js";
-import { advanceToNextPhase } from "../src/phase-transition.js";
+import { advanceToNextPhase, ensureTaskBranch } from "../src/phase-transition.js";
 import { loadState } from "../src/state.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
@@ -160,6 +160,36 @@ test("all-complete marks the project done on base without creating a branch", as
     assert.equal(execFileSync("git", ["branch", "--show-current"], { cwd: context.project }).toString().trim(), "master");
     assert.match(fs.readFileSync(path.join(context.project, "BUILD_LOG.md"), "utf8"), /\[next-phase\] all phases complete/u);
   } finally { cleanup(context); }
+});
+
+test("ensureTaskBranch creates a branch on the base branch and is a no-op once on one", () => {
+  const directory = writableTemporaryDirectory("hephaestus-ensure-branch-");
+  const root = path.join(directory, "projects");
+  const project = path.join(root, "demo");
+  fs.mkdirSync(project, { recursive: true });
+  execFileSync("git", ["init", "-q", "-b", "master", project], { stdio: "pipe" });
+  git(project, ["config", "user.email", "t@local"]);
+  git(project, ["config", "user.name", "t"]);
+  const freshState = { ...mergedState, currentPhase: "1", currentTask: "first-task", currentBranch: "master", mergeStatus: "not-started", nextAction: "run-agent" };
+  delete freshState.agent;
+  fs.writeFileSync(path.join(project, "PLAN.md"), PLAN);
+  fs.writeFileSync(path.join(project, "BUILDING_REFERENCE.md"), "rules\n");
+  fs.writeFileSync(path.join(project, "BUILD_LOG.md"), "# Build log\n");
+  fs.writeFileSync(path.join(project, "CURRENT_TASK.md"), "# task\n");
+  fs.writeFileSync(path.join(project, "STATE.json"), `${JSON.stringify(freshState, null, 2)}\n`);
+  git(project, ["add", "-A"]);
+  git(project, ["commit", "-qm", "init"]);
+  try {
+    const first = ensureTaskBranch({ allowedRoot: root, projectPath: project, projectId: "demo" });
+    assert.equal(first.created, true);
+    assert.equal(first.branch, "hephaestus/demo/first-task");
+    assert.equal(execFileSync("git", ["branch", "--show-current"], { cwd: project }).toString().trim(), "hephaestus/demo/first-task");
+    assert.equal(loadState(project).currentBranch, "hephaestus/demo/first-task");
+    const second = ensureTaskBranch({ allowedRoot: root, projectPath: project, projectId: "demo" });
+    assert.equal(second.created, false, "already on a task branch");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("a merge recorded only in mergeGate (not mergeStatus) still counts as merged", async () => {

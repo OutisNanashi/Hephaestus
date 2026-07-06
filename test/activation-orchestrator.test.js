@@ -9,7 +9,7 @@ const project = { id: "demo", path: "demo" };
 // A fake project whose state advances exactly as the real modules would: build a
 // task, merge it, advance to the next phase, until PLAN.md's phases run out.
 function harness({ phases = 3, build = () => "task-complete", merged = () => true, startMerged = false, advanceKeepsTask = false } = {}) {
-  const box = { phase: 1, task: "task-1", merged: startMerged, done: false, builds: 0, merges: 0, advances: 0 };
+  const box = { phase: 1, task: "task-1", merged: startMerged, done: false, builds: 0, merges: 0, advances: 0, prepares: 0, branch: "master" };
   const deps = {
     readState: () => ({
       currentPhase: String(box.phase),
@@ -17,6 +17,7 @@ function harness({ phases = 3, build = () => "task-complete", merged = () => tru
       mergeStatus: box.merged ? "merged" : "not-started",
       nextAction: box.done ? "project-complete" : (box.merged ? "next-phase-eligible" : "run-agent")
     }),
+    prepareBranch: () => { box.prepares += 1; const created = box.branch === "master"; box.branch = `hephaestus/demo/${box.task}`; return { created, branch: box.branch }; },
     runLiveLoop: async () => { box.builds += 1; return { status: build(box), reason: "reason", cycles: [], notification: "sent" }; },
     autoMerge: async () => {
       box.merges += 1;
@@ -41,6 +42,7 @@ test("Auto mode chains build -> merge -> advance through every phase to completi
   const result = await orchestrateRunLive({ mode: AUTO_MERGE_MODE, config, project, deps });
   assert.equal(result.outcome, "project-complete");
   assert.equal(box.builds, 3);
+  assert.equal(box.prepares, 3, "a task branch is ensured before every phase build");
   assert.equal(box.merges, 3);
   const merged = result.phases.filter((p) => p.stage === "merged");
   assert.equal(merged.length, 3);
