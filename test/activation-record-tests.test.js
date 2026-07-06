@@ -39,6 +39,30 @@ test("recordDeclaredTests runs the declared command and records evidence the gat
   }
 });
 
+test("watched files that do not exist yet are fingerprinted as absent, and creating one forces a retest", () => {
+  const context = makeProject();
+  try {
+    // Declare a later-phase file that does not exist yet alongside the real one.
+    fs.writeFileSync(path.join(context.project, "TESTS.json"), `${JSON.stringify({
+      requiredCommands: [{ id: "unit", outputRequired: true, argv: [NODE, "-e", "console.log('unit-ok')"] }],
+      watchedFiles: ["source.txt", "src/future-phase.js"]
+    })}\n`);
+    const result = recordDeclaredTests(context.project);
+    assert.equal(result.verification.status, "passed");
+    assert.equal(verifyTestEvidence(context.project).status, "passed");
+    // The later phase creates the watched file: old evidence must go stale.
+    fs.mkdirSync(path.join(context.project, "src"));
+    fs.writeFileSync(path.join(context.project, "src", "future-phase.js"), "export {};\n");
+    const stale = verifyTestEvidence(context.project);
+    assert.equal(stale.status, "blocked");
+    assert.equal(stale.reason, "post-fix-retest-required");
+    // Re-recording after the change passes again.
+    assert.equal(recordDeclaredTests(context.project).verification.status, "passed");
+  } finally {
+    cleanup(context);
+  }
+});
+
 test("recordDeclaredTests records a failing command and the gate blocks it", () => {
   const context = makeProject({ argv: [NODE, "-e", "console.error('boom'); process.exit(3)"] });
   try {

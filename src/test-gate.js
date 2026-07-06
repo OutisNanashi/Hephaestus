@@ -44,8 +44,16 @@ export function projectFingerprint(projectPath, declaration) {
   const hash = crypto.createHash("sha256");
   for (const relativePath of [...declaration.watchedFiles].sort()) {
     const filePath = path.join(projectPath, relativePath);
-    assertRealPathWithinRoot(projectPath, filePath);
-    hash.update(relativePath); hash.update("\0"); hash.update(fs.readFileSync(filePath)); hash.update("\0");
+    hash.update(relativePath); hash.update("\0");
+    // A watched file may not exist yet (declared for a later phase). Its absence
+    // is fingerprinted, so creating it later still forces a fresh retest.
+    if (fs.existsSync(filePath)) {
+      assertRealPathWithinRoot(projectPath, filePath);
+      hash.update("1\0"); hash.update(fs.readFileSync(filePath));
+    } else {
+      hash.update("0\0");
+    }
+    hash.update("\0");
   }
   return hash.digest("hex");
 }
