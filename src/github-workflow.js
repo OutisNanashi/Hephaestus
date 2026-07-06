@@ -33,6 +33,24 @@ function runGh(projectPath, args, spawn = defaultSpawn) {
   return (result.stdout ?? "").trim();
 }
 
+/** Publish the branch with a normal (never force) push through the injectable spawn. */
+function runGitPush(projectPath, branch, spawn = defaultSpawn) {
+  const result = spawn("git", ["push", "--set-upstream", "origin", branch], {
+    encoding: "utf8",
+    timeout: GH_TIMEOUT_MS,
+    killSignal: "SIGTERM",
+    shell: false,
+    cwd: projectPath,
+    env: process.env,
+    input: ""
+  });
+  if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM" || result.signal === "SIGKILL") {
+    fail("Git push timed out.", "GIT_WORKFLOW_TIMED_OUT");
+  }
+  if (result.error) fail(`Git push could not start: ${result.error.message}`, "GIT_WORKFLOW_FAILED");
+  if (result.status !== 0) fail((result.stderr ?? "").trim() || "Git push failed.", "GIT_WORKFLOW_FAILED");
+}
+
 function ghJson(projectPath, args, spawn) {
   const output = runGh(projectPath, args, spawn);
   try {
@@ -67,6 +85,9 @@ export function dirtyIgnoringConductorArtifacts(porcelain) {
 export function openGithubPr({ projectPath, state, title, body = "", base = "master", spawn = defaultSpawn }) {
   const branch = git(projectPath, ["branch", "--show-current"]);
   if (branch === "") fail("A PR requires a checked-out branch.", "GITHUB_WORKFLOW_FAILED");
+  // gh pr create refuses branches that only exist locally, and an existing PR
+  // must see the latest commits; publish them first with a normal push.
+  runGitPush(projectPath, branch, spawn);
   let existing = null;
   try {
     existing = ghJson(projectPath, ["pr", "view", branch, "--json", "number,url,state"], spawn);

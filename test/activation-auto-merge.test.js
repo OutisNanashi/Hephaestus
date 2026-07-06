@@ -9,13 +9,27 @@ const project = Object.freeze({ id: "demo", path: "/projects/demo" });
 const state = Object.freeze({ currentTask: "demo-task", currentPhase: "1" });
 const completeLoop = Object.freeze({ status: "task-complete", reason: "done", cycles: [] });
 
-function deps({ approved = true, merged = true } = {}) {
+function deps({ approved = true, merged = true, pending = true } = {}) {
   const calls = [];
   const api = {
     calls,
     validateProjectDirectory: () => {
       calls.push("validate");
       return { path: project.path, state };
+    },
+    hasPendingChanges: () => {
+      calls.push("pending-check");
+      return pending;
+    },
+    commitTask: (repo, message) => {
+      calls.push("git-commit");
+      assert.equal(repo, project.path);
+      assert.equal(message, "Hephaestus: demo-task");
+      return { hash: "commit123", branch: "hephaestus/demo/demo-task", message };
+    },
+    recordDeclaredTests: () => {
+      calls.push("record-tests");
+      return { reportPath: "/projects/demo/out/test_reports/evidence.json", verification: { status: "passed" }, commands: [{ id: "unit", exitCode: 0 }] };
     },
     openGithubPr: () => {
       calls.push("pr-open");
@@ -82,11 +96,18 @@ test("run-live --manual-merge is accepted and behaves like default Manual-merge 
   assert.deepEqual(manualFake.calls, []);
 });
 
-test("Auto-merge Mode opens PR, asks GPT, then executes merge after approval", async () => {
+test("Auto-merge Mode commits pending work, records tests, opens PR, asks GPT, then executes merge after approval", async () => {
   const fake = deps();
   const result = await finishRunLive({ mode: AUTO_MERGE_MODE, config, project, loop: completeLoop, deps: fake });
   assert.equal(result.merge.merged, true);
-  assert.deepEqual(fake.calls, ["validate", "pr-open", "validate", "fetch-evidence", "verify-tests", "merge-approve", "save-approval", "validate", "merge-execute"]);
+  assert.deepEqual(fake.calls, ["validate", "pending-check", "git-commit", "record-tests", "pr-open", "validate", "fetch-evidence", "verify-tests", "merge-approve", "save-approval", "validate", "merge-execute"]);
+});
+
+test("Auto-merge Mode skips the commit when the worktree is already clean", async () => {
+  const fake = deps({ pending: false });
+  const result = await finishRunLive({ mode: AUTO_MERGE_MODE, config, project, loop: completeLoop, deps: fake });
+  assert.equal(result.merge.merged, true);
+  assert.deepEqual(fake.calls, ["validate", "pending-check", "record-tests", "pr-open", "validate", "fetch-evidence", "verify-tests", "merge-approve", "save-approval", "validate", "merge-execute"]);
 });
 
 test("Auto-merge Mode stops without merge when GPT approval rejects", async () => {
@@ -94,7 +115,7 @@ test("Auto-merge Mode stops without merge when GPT approval rejects", async () =
   const result = await finishRunLive({ mode: AUTO_MERGE_MODE, config, project, loop: completeLoop, deps: fake });
   assert.equal(result.merge.merged, false);
   assert.equal(result.merge.stage, "merge-approve");
-  assert.deepEqual(fake.calls, ["validate", "pr-open", "validate", "fetch-evidence", "verify-tests", "merge-approve"]);
+  assert.deepEqual(fake.calls, ["validate", "pending-check", "git-commit", "record-tests", "pr-open", "validate", "fetch-evidence", "verify-tests", "merge-approve"]);
 });
 
 test("Auto-merge Mode does not start PR/approval/merge after non-complete endings", async () => {

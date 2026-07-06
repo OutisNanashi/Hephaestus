@@ -36,6 +36,7 @@ export function taskBranchName(projectId, task) {
   return `hephaestus/${gitSlug(projectId)}/${gitSlug(task)}`;
 }
 export function assertCleanTree(repo) { if(git(repo,["status","--porcelain"])!=="") fail("Git worktree is dirty.","GIT_DIRTY_TREE"); }
+export function hasPendingChanges(repo) { return git(repo,["status","--porcelain"]) !== ""; }
 export function createTaskBranch(repo, projectId, task) { assertCleanTree(repo); const branch=taskBranchName(projectId,task); git(repo,["switch","-c",branch]); return branch; }
 export function commitTask(repo, message) { if(git(repo,["status","--porcelain"])==="") fail("Empty commits are forbidden.","EMPTY_GIT_COMMIT"); git(repo,["add","-A"]); git(repo,["commit","-m",message]); return Object.freeze({ hash:git(repo,["rev-parse","HEAD"]), branch:git(repo,["branch","--show-current"]), message }); }
 export function fixturePr(projectId, task, existing=null) {
