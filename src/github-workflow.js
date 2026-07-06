@@ -194,7 +194,10 @@ export function executeGithubMerge({ projectPath, state, projectId, approval, sp
   if (!report.allowed) {
     return Object.freeze({ merged: false, blockers: report.blockers.map((item) => item.code), report });
   }
-  runGh(projectPath, ["pr", "merge", String(report.pr.number), "--merge", "--delete-branch"], spawn);
+  // Merge remotely only: gh's --delete-branch also checks out the base branch
+  // locally, which fails on conductor-artifact churn and would crash the run
+  // AFTER the remote merge succeeded, losing the merge record.
+  runGh(projectPath, ["pr", "merge", String(report.pr.number), "--merge"], spawn);
   const merged = ghJson(projectPath, ["pr", "view", String(report.pr.number), "--json", "mergeCommit,mergedAt"], spawn);
   const mergeCommit = merged.mergeCommit?.oid ?? null;
   if (typeof mergeCommit !== "string" || mergeCommit.trim() === "") {
@@ -208,5 +211,14 @@ export function executeGithubMerge({ projectPath, state, projectId, approval, sp
     actor: "conductor-merge-relay",
     mergedAt: merged.mergedAt ?? input.now
   });
-  return Object.freeze({ merged: true, mergeCommit, blockers: [], report, recorded });
+  // Best-effort remote branch cleanup after the result is safely recorded;
+  // the local checkout is never touched.
+  let branchDeleted = false;
+  try {
+    runGh(projectPath, ["api", "--method", "DELETE", `repos/{owner}/{repo}/git/refs/heads/${report.pr.headBranch}`], spawn);
+    branchDeleted = true;
+  } catch {
+    branchDeleted = false;
+  }
+  return Object.freeze({ merged: true, mergeCommit, blockers: [], report, recorded, branchDeleted });
 }

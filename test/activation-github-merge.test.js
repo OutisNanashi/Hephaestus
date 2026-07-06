@@ -34,6 +34,7 @@ function prJson(overrides = {}) {
 // Fake gh spawn: answers `pr view` with the configured PR and records merges.
 function ghSpawn({ pr = prJson(), mergeCommit = "merge789" } = {}, capture = {}) {
   capture.merges = [];
+  capture.branchDeletions = [];
   return (executable, args) => {
     assert.equal(executable, "gh");
     if (args[0] === "pr" && args[1] === "view" && args.includes("number,url,state,headRefName,baseRefName,mergeable,headRefOid")) {
@@ -44,6 +45,10 @@ function ghSpawn({ pr = prJson(), mergeCommit = "merge789" } = {}, capture = {})
     }
     if (args[0] === "pr" && args[1] === "merge") {
       capture.merges.push(args);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "api" && args.includes("--method") && args.includes("DELETE")) {
+      capture.branchDeletions.push(args);
       return { status: 0, stdout: "", stderr: "" };
     }
     return { status: 1, stdout: "", stderr: `unexpected gh args: ${args.join(" ")}` };
@@ -111,7 +116,12 @@ test("merge executes only when every gate passes, then records the result", () =
     assert.equal(result.merged, true);
     assert.equal(result.mergeCommit, "merge789");
     assert.equal(capture.merges.length, 1);
-    assert.deepEqual(capture.merges[0], ["pr", "merge", "9", "--merge", "--delete-branch"]);
+    // No --delete-branch: gh would also check out the base branch locally,
+    // which fails on conductor churn after the remote merge already happened.
+    assert.deepEqual(capture.merges[0], ["pr", "merge", "9", "--merge"]);
+    assert.equal(result.branchDeleted, true);
+    assert.equal(capture.branchDeletions.length, 1);
+    assert.deepEqual(capture.branchDeletions[0], ["api", "--method", "DELETE", "repos/{owner}/{repo}/git/refs/heads/hephaestus/demo/demo-task"]);
     const state = loadState(context.project);
     assert.equal(state.mergeStatus, "merged");
     assert.equal(state.mergeGate.nextPhaseEligible, true);
