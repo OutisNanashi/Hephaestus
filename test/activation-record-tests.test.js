@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { HephaestusError } from "../src/errors.js";
-import { openGithubPr } from "../src/github-workflow.js";
+import { fetchGithubMergeEvidence, openGithubPr } from "../src/github-workflow.js";
 import { loadTestDeclaration, recordDeclaredTests, verifyTestEvidence } from "../src/test-gate.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
@@ -138,6 +138,58 @@ test("openGithubPr publishes the branch with a normal push before creating the P
     for (const forbidden of ["--force", "-f", "--force-with-lease"]) {
       assert.equal(flat.includes(forbidden), false, `push must never use ${forbidden}`);
     }
+  } finally {
+    cleanup(context);
+  }
+});
+
+function mergeEvidenceSpawn(mergeableSequence) {
+  let view = 0;
+  return (executable, args) => {
+    if (executable === "gh" && args[0] === "pr" && args[1] === "view") {
+      const mergeable = mergeableSequence[Math.min(view, mergeableSequence.length - 1)];
+      view += 1;
+      return {
+        status: 0,
+        stdout: JSON.stringify({
+          number: 1, url: "https://example.test/pr/1", state: "OPEN",
+          headRefName: "hephaestus/demo/demo-task", baseRefName: "master",
+          mergeable, headRefOid: "abc123"
+        }),
+        stderr: ""
+      };
+    }
+    return { status: 1, stdout: "", stderr: `unexpected spawn: ${executable} ${args.join(" ")}` };
+  };
+}
+
+test("fetchGithubMergeEvidence polls until GitHub resolves UNKNOWN mergeability", () => {
+  const context = makePrProject();
+  try {
+    const sleeps = [];
+    const evidence = fetchGithubMergeEvidence({
+      projectPath: context.project, state: prState, projectId: "demo",
+      spawn: mergeEvidenceSpawn(["UNKNOWN", "UNKNOWN", "MERGEABLE"]),
+      sleep: (ms) => sleeps.push(ms)
+    });
+    assert.equal(evidence.pr.mergeable, true);
+    assert.equal(sleeps.length, 2);
+  } finally {
+    cleanup(context);
+  }
+});
+
+test("fetchGithubMergeEvidence stops polling and reports unclear mergeability after the attempt budget", () => {
+  const context = makePrProject();
+  try {
+    const sleeps = [];
+    const evidence = fetchGithubMergeEvidence({
+      projectPath: context.project, state: prState, projectId: "demo",
+      spawn: mergeEvidenceSpawn(["UNKNOWN"]),
+      sleep: (ms) => sleeps.push(ms)
+    });
+    assert.equal(evidence.pr.mergeable, null);
+    assert.equal(sleeps.length, 5);
   } finally {
     cleanup(context);
   }

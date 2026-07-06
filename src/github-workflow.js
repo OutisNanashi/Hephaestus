@@ -66,6 +66,16 @@ function mergeableFlag(value) {
   return null;
 }
 
+// GitHub computes mergeability asynchronously: immediately after a PR is
+// created or pushed to, `gh pr view` reports UNKNOWN, which the gate and the
+// approval brain must treat as not-mergeable. Poll briefly for a real verdict.
+const MERGEABILITY_POLL_ATTEMPTS = 5;
+const MERGEABILITY_POLL_DELAY_MS = 3_000;
+
+function defaultSleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 // The conductor constantly rewrites its own state/log/report files inside the
 // project, so they are always newer than the last commit. Only non-conductor
 // changes count as a dirty tree; real uncommitted code still blocks the merge.
@@ -111,10 +121,15 @@ export function openGithubPr({ projectPath, state, title, body = "", base = "mas
 }
 
 /** Collect real merge evidence from git and GitHub in the exact shape the merge gate expects. */
-export function fetchGithubMergeEvidence({ projectPath, state, projectId, spawn = defaultSpawn, now = () => new Date().toISOString() }) {
+export function fetchGithubMergeEvidence({ projectPath, state, projectId, spawn = defaultSpawn, now = () => new Date().toISOString(), sleep = defaultSleep }) {
   const currentBranch = git(projectPath, ["branch", "--show-current"]);
   const dirty = dirtyIgnoringConductorArtifacts(git(projectPath, ["status", "--porcelain"]));
-  const pr = ghJson(projectPath, ["pr", "view", currentBranch, "--json", "number,url,state,headRefName,baseRefName,mergeable,headRefOid"], spawn);
+  const prViewArgs = ["pr", "view", currentBranch, "--json", "number,url,state,headRefName,baseRefName,mergeable,headRefOid"];
+  let pr = ghJson(projectPath, prViewArgs, spawn);
+  for (let attempt = 0; mergeableFlag(pr.mergeable) === null && attempt < MERGEABILITY_POLL_ATTEMPTS; attempt += 1) {
+    sleep(MERGEABILITY_POLL_DELAY_MS);
+    pr = ghJson(projectPath, prViewArgs, spawn);
+  }
   let testsPassed = false;
   try {
     testsPassed = verifyTestEvidence(projectPath).status === "passed";
