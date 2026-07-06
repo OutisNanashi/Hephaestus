@@ -14,45 +14,56 @@ function defaultSpawn(executable, args, options) {
   return spawnSync(executable, args, { ...options, shell: false });
 }
 
-/** Run one gh CLI command inside the project repo; gh brings its own stored auth. */
-function runGh(projectPath, args, spawn = defaultSpawn) {
-  const result = spawn("gh", args, {
-    encoding: "utf8",
-    timeout: GH_TIMEOUT_MS,
-    killSignal: "SIGTERM",
-    shell: false,
-    cwd: projectPath,
-    env: process.env,
-    input: ""
-  });
-  if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM" || result.signal === "SIGKILL") {
-    fail("GitHub CLI command timed out.", "GITHUB_WORKFLOW_TIMED_OUT");
+const NETWORK_RETRY_ATTEMPTS = 4;
+const NETWORK_RETRY_BASE_MS = 2_000;
+const NETWORK_RETRY_CAP_MS = 15_000;
+
+// Transient GitHub/network conditions an unattended run should ride out rather
+// than abort on: gateway timeouts, 5xx, "try again", dropped connections, DNS
+// blips. Auth, permission, and validation failures deliberately are NOT here —
+// those are real and must stop the run.
+const TRANSIENT_NETWORK = /\b(50[0234])\b|gateway timeout|bad gateway|service unavailable|temporarily unavailable|timed? ?out|try again|connection reset|connection refused|could not resolve host|network is unreachable|econnreset|etimedout|eai_again|remote end hung up|early eof/iu;
+
+export function isTransientNetworkError(text) {
+  return TRANSIENT_NETWORK.test(text ?? "");
+}
+
+// Run one external command inside the repo, retrying transient network failures
+// with capped exponential backoff. A missing executable or a non-transient
+// non-zero exit fails immediately; the last transient failure keeps its code.
+function runRepoCommand({ projectPath, executable, args, timeoutCode, failCode, notStartedCode, spawn = defaultSpawn, sleep = defaultSleep, attempts = NETWORK_RETRY_ATTEMPTS }) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const result = spawn(executable, args, {
+      encoding: "utf8",
+      timeout: GH_TIMEOUT_MS,
+      killSignal: "SIGTERM",
+      shell: false,
+      cwd: projectPath,
+      env: process.env,
+      input: ""
+    });
+    const timedOut = result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM" || result.signal === "SIGKILL";
+    if (!timedOut && result.error) fail(`${executable} could not start: ${result.error.message}`, notStartedCode);
+    if (!timedOut && result.status === 0) return (result.stdout ?? "").trim();
+    const message = timedOut ? `${executable} command timed out.` : ((result.stderr ?? "").trim() || `${executable} command failed.`);
+    const transient = timedOut || isTransientNetworkError(message);
+    if (!transient || attempt === attempts - 1) fail(message, timedOut ? timeoutCode : failCode);
+    sleep(Math.min(NETWORK_RETRY_BASE_MS * (2 ** attempt), NETWORK_RETRY_CAP_MS));
   }
-  if (result.error) fail(`GitHub CLI could not start: ${result.error.message}`, "GITHUB_CLI_UNAVAILABLE");
-  if (result.status !== 0) fail((result.stderr ?? "").trim() || "GitHub CLI command failed.", "GITHUB_WORKFLOW_FAILED");
-  return (result.stdout ?? "").trim();
+}
+
+/** Run one gh CLI command inside the project repo; gh brings its own stored auth. */
+function runGh(projectPath, args, spawn = defaultSpawn, sleep = defaultSleep) {
+  return runRepoCommand({ projectPath, executable: "gh", args, timeoutCode: "GITHUB_WORKFLOW_TIMED_OUT", failCode: "GITHUB_WORKFLOW_FAILED", notStartedCode: "GITHUB_CLI_UNAVAILABLE", spawn, sleep });
 }
 
 /** Publish the branch with a normal (never force) push through the injectable spawn. */
-function runGitPush(projectPath, branch, spawn = defaultSpawn) {
-  const result = spawn("git", ["push", "--set-upstream", "origin", branch], {
-    encoding: "utf8",
-    timeout: GH_TIMEOUT_MS,
-    killSignal: "SIGTERM",
-    shell: false,
-    cwd: projectPath,
-    env: process.env,
-    input: ""
-  });
-  if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM" || result.signal === "SIGKILL") {
-    fail("Git push timed out.", "GIT_WORKFLOW_TIMED_OUT");
-  }
-  if (result.error) fail(`Git push could not start: ${result.error.message}`, "GIT_WORKFLOW_FAILED");
-  if (result.status !== 0) fail((result.stderr ?? "").trim() || "Git push failed.", "GIT_WORKFLOW_FAILED");
+function runGitPush(projectPath, branch, spawn = defaultSpawn, sleep = defaultSleep) {
+  runRepoCommand({ projectPath, executable: "git", args: ["push", "--set-upstream", "origin", branch], timeoutCode: "GIT_WORKFLOW_TIMED_OUT", failCode: "GIT_WORKFLOW_FAILED", notStartedCode: "GIT_WORKFLOW_FAILED", spawn, sleep });
 }
 
-function ghJson(projectPath, args, spawn) {
-  const output = runGh(projectPath, args, spawn);
+function ghJson(projectPath, args, spawn, sleep = defaultSleep) {
+  const output = runGh(projectPath, args, spawn, sleep);
   try {
     return JSON.parse(output);
   } catch (error) {
@@ -96,15 +107,15 @@ export function dirtyIgnoringConductorArtifacts(porcelain) {
 }
 
 /** Open the PR for the current branch, or return the existing one; merge stays blocked. */
-export function openGithubPr({ projectPath, state, title, body = "", base = "master", spawn = defaultSpawn }) {
+export function openGithubPr({ projectPath, state, title, body = "", base = "master", spawn = defaultSpawn, sleep = defaultSleep }) {
   const branch = git(projectPath, ["branch", "--show-current"]);
   if (branch === "") fail("A PR requires a checked-out branch.", "GITHUB_WORKFLOW_FAILED");
   // gh pr create refuses branches that only exist locally, and an existing PR
   // must see the latest commits; publish them first with a normal push.
-  runGitPush(projectPath, branch, spawn);
+  runGitPush(projectPath, branch, spawn, sleep);
   let existing = null;
   try {
-    existing = ghJson(projectPath, ["pr", "view", branch, "--json", "number,url,state"], spawn);
+    existing = ghJson(projectPath, ["pr", "view", branch, "--json", "number,url,state"], spawn, sleep);
   } catch (error) {
     if (error?.code !== "GITHUB_WORKFLOW_FAILED") throw error;
   }
@@ -115,8 +126,8 @@ export function openGithubPr({ projectPath, state, title, body = "", base = "mas
     status = "updated";
   } else {
     if (typeof title !== "string" || title.trim() === "") fail("PR creation requires a title.", "INVALID_ARGUMENT");
-    runGh(projectPath, ["pr", "create", "--title", title, "--body", body, "--head", branch, "--base", base], spawn);
-    url = ghJson(projectPath, ["pr", "view", branch, "--json", "url"], spawn).url;
+    runGh(projectPath, ["pr", "create", "--title", title, "--body", body, "--head", branch, "--base", base], spawn, sleep);
+    url = ghJson(projectPath, ["pr", "view", branch, "--json", "url"], spawn, sleep).url;
     status = "open";
   }
   const metadata = Object.freeze({ url, status, branch, mergeBlocked: true, forcePushAllowed: false });
