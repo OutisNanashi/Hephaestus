@@ -110,6 +110,9 @@ export function dirtyIgnoringConductorArtifacts(porcelain) {
 export function openGithubPr({ projectPath, state, title, body = "", base = "master", spawn = defaultSpawn, sleep = defaultSleep }) {
   const branch = git(projectPath, ["branch", "--show-current"]);
   if (branch === "") fail("A PR requires a checked-out branch.", "GITHUB_WORKFLOW_FAILED");
+  // Never push or PR the base branch: a task branch is always required, so a
+  // build that landed on base is caught here instead of pushing straight to it.
+  if (branch === base) fail(`Refusing to open a PR from the base branch "${base}"; a task branch is required.`, "GITHUB_WORKFLOW_FAILED");
   // gh pr create refuses branches that only exist locally, and an existing PR
   // must see the latest commits; publish them first with a normal push.
   runGitPush(projectPath, branch, spawn, sleep);

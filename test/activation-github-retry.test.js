@@ -90,6 +90,30 @@ test("a non-transient pr-create failure aborts immediately without retrying", ()
   } finally { cleanup(context); }
 });
 
+test("openGithubPr refuses to open a PR from the base branch before touching the network", () => {
+  const directory = writableTemporaryDirectory("hephaestus-gh-base-");
+  const project = path.join(directory, "demo");
+  fs.mkdirSync(project, { recursive: true });
+  execFileSync("git", ["init", "-q", "-b", "master", project]);
+  execFileSync("git", ["config", "user.email", "t@local"], { cwd: project });
+  execFileSync("git", ["config", "user.name", "t"], { cwd: project });
+  fs.writeFileSync(path.join(project, "STATE.json"), `${JSON.stringify(state, null, 2)}\n`);
+  fs.writeFileSync(path.join(project, "file.txt"), "x\n");
+  execFileSync("git", ["add", "-A"], { cwd: project });
+  execFileSync("git", ["commit", "-qm", "init"], { cwd: project });
+  try {
+    assert.throws(() => openGithubPr({
+      projectPath: project, state, title: "Demo",
+      spawn: () => { throw new Error("spawn must not run for a base-branch PR"); },
+      sleep: () => {}
+    }), (error) => {
+      assert.ok(error instanceof HephaestusError);
+      assert.equal(error.code, "GITHUB_WORKFLOW_FAILED");
+      return true;
+    });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("transient failures past the attempt budget give up with the workflow error code", () => {
   const context = makeRepo();
   const capture = {};
