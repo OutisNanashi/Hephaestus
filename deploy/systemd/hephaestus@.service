@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=/opt/hephaestus
 EnvironmentFile=/opt/hephaestus/.env
-ExecStart=/usr/bin/node src/cli.js run-live --project %i --max-cycles 5 --config hephaestus.vps.config.json
+# env lookup: node may live in /usr/bin, /usr/local/bin, or a version manager.
+ExecStart=/usr/bin/env node src/cli.js run-live --project %i --max-cycles 5 --config hephaestus.vps.config.json
 # run-live exits non-zero on blocked/paused/max-cycles; that is normal, not a crash.
 SuccessExitStatus=0 1
