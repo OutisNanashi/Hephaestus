@@ -1,8 +1,9 @@
 import { fail } from "./errors.js";
+import { commitTask, hasPendingChanges } from "./git-workflow.js";
 import { executeGithubMerge, fetchGithubMergeEvidence, openGithubPr, saveApproval } from "./github-workflow.js";
 import { requestMergeApproval } from "./merge-approval.js";
 import { validateProjectDirectory } from "./project.js";
-import { verifyTestEvidence } from "./test-gate.js";
+import { recordDeclaredTests, verifyTestEvidence } from "./test-gate.js";
 
 export const MANUAL_MERGE_MODE = "Manual-merge Mode";
 export const AUTO_MERGE_MODE = "Auto-merge Mode";
@@ -10,6 +11,9 @@ export const MERGE_PIPELINE = Object.freeze(["pr-open", "merge-approve", "merge-
 
 const DEFAULT_DEPS = Object.freeze({
   validateProjectDirectory,
+  hasPendingChanges,
+  commitTask,
+  recordDeclaredTests,
   openGithubPr,
   fetchGithubMergeEvidence,
   verifyTestEvidence,
@@ -28,6 +32,13 @@ async function runAutoMergePipeline({ config, project, loop, deps = DEFAULT_DEPS
   }
 
   const validated = deps.validateProjectDirectory(config.allowedRoot, project.path);
+  // The loop leaves Codex's edits uncommitted: commit them (normal commit on the
+  // current task branch), then run the declared tests and record fresh evidence
+  // so the merge gate verifies conductor-run results, never agent claims.
+  if (deps.hasPendingChanges(validated.path)) {
+    deps.commitTask(validated.path, `Hephaestus: ${validated.state.currentTask}`);
+  }
+  deps.recordDeclaredTests(validated.path);
   const pr = deps.openGithubPr({
     projectPath: validated.path,
     state: validated.state,

@@ -59,7 +59,9 @@ Each project lives under `/srv/projects/<id>` and must:
 
 - be a **git repository** with a GitHub remote (Codex refuses folders without version control),
 - contain `PLAN.md`, `BUILDING_REFERENCE.md`, `BUILD_LOG.md`, `CURRENT_TASK.md`, and a valid `STATE.json`,
-- contain a `TESTS.json` declaring the required test commands,
+- contain a `TESTS.json` declaring the required test commands; give each
+  command an `argv` array so the conductor can run it and record evidence, e.g.
+  `{ "requiredCommands": [{ "id": "unit", "outputRequired": true, "argv": ["npm", "test"] }], "watchedFiles": ["src/index.js"] }`,
 - gitignore nothing special — conductor artifacts (`STATE.json` churn, `out/`, `merge-inbox/`) are ignored by the merge gate's dirty-tree check automatically.
 
 Verify before enabling automation:
@@ -87,9 +89,11 @@ To opt into **Auto-merge Mode** for a finished task:
 node src/cli.js run-live --config hephaestus.vps.config.json --project <id> --auto-merge
 ```
 
-Auto-merge Mode runs the existing `pr-open`, `merge-approve`, and
-`merge-execute` path only after exact `task-complete`; GPT approval and merge
-gates still decide whether anything merges.
+Auto-merge Mode runs only after exact `task-complete`: it commits the loop's
+pending work on the current task branch, runs the declared test commands and
+records the evidence (`record-tests`), then runs the existing `pr-open`,
+`merge-approve`, and `merge-execute` path; GPT approval and merge gates still
+decide whether anything merges.
 
 Unattended, via systemd (one timer per project):
 
@@ -108,6 +112,8 @@ exactly once (deduplicated across runs).
 The manual chain remains available:
 
 ```sh
+node src/cli.js git-commit --config hephaestus.vps.config.json --project <id> --message "<summary>"
+node src/cli.js record-tests --config hephaestus.vps.config.json --project <id>
 node src/cli.js pr-open --config hephaestus.vps.config.json --project <id> --provider github
 node src/cli.js merge-approve --config hephaestus.vps.config.json --project <id>
 node src/cli.js merge-execute --config hephaestus.vps.config.json --project <id>

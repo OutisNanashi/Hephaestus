@@ -15,6 +15,7 @@ node src/cli.js status                                    # read-only project ov
 node src/cli.js validate --project <id>                   # check a registered project
 node src/cli.js run-live --project <id> [--max-cycles n]  # Manual-merge Mode
 node src/cli.js run-live --project <id> --auto-merge      # Auto-merge Mode
+node src/cli.js record-tests --project <id>               # run declared tests, record evidence
 node src/cli.js pr-open --project <id> --provider github  # open/update the real PR
 node src/cli.js merge-approve --project <id>              # scoped GPT merge verdict
 node src/cli.js merge-execute --project <id>              # gated real merge
