@@ -29,8 +29,10 @@ function safePromptPath({ allowedRoot, projectPath, promptPath }) {
   if (typeof promptPath !== "string" || promptPath.length === 0 || promptPath.split(/[\\/]+/u).includes("..")) {
     fail("Agent prompt path must be a non-empty relative path without traversal.", "INVALID_AGENT_PROMPT_PATH");
   }
-  const projectRelative = path.isAbsolute(promptPath) ? promptPath : path.join(projectPath, promptPath);
-  const resolved = fs.existsSync(projectRelative) ? projectRelative : path.resolve(promptPath);
+  // Prompts must live inside the selected project; never fall back to resolving
+  // against the conductor's own working directory (its runtime artifacts could
+  // otherwise shadow a deleted project prompt).
+  const resolved = path.isAbsolute(promptPath) ? promptPath : path.join(projectPath, promptPath);
   assertRealPathWithinRoot(allowedRoot, resolved);
   if (!fs.statSync(resolved).isFile()) fail("Agent prompt path must be a regular file.", "INVALID_AGENT_PROMPT_PATH");
   return resolved;
