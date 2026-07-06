@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { HephaestusError } from "../src/errors.js";
-import { fetchGithubMergeEvidence, openGithubPr } from "../src/github-workflow.js";
+import { dirtyIgnoringConductorArtifacts, fetchGithubMergeEvidence, openGithubPr } from "../src/github-workflow.js";
 import { loadTestDeclaration, recordDeclaredTests, verifyTestEvidence } from "../src/test-gate.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
@@ -190,6 +190,36 @@ test("fetchGithubMergeEvidence stops polling and reports unclear mergeability af
     });
     assert.equal(evidence.pr.mergeable, null);
     assert.equal(sleeps.length, 5);
+  } finally {
+    cleanup(context);
+  }
+});
+
+test("dirty parsing ignores conductor artifacts even when the first porcelain line lost its leading space", () => {
+  // git() trims stdout, so " M BUILD_LOG.md\n M STATE.json" arrives as "M BUILD_LOG.md\n M STATE.json".
+  assert.equal(dirtyIgnoringConductorArtifacts("M BUILD_LOG.md\n M STATE.json"), false);
+  assert.equal(dirtyIgnoringConductorArtifacts("M STATE.json\n?? out/test_reports/evidence.json"), false);
+  assert.equal(dirtyIgnoringConductorArtifacts("M src/calc.js\n M STATE.json"), true);
+  assert.equal(dirtyIgnoringConductorArtifacts("?? untracked.txt"), true);
+  assert.equal(dirtyIgnoringConductorArtifacts(""), false);
+});
+
+test("merge evidence reports a clean tree when only conductor artifacts changed (through real git)", () => {
+  const context = makePrProject();
+  try {
+    fs.appendFileSync(path.join(context.project, "BUILD_LOG.md"), "[test] conductor churn\n");
+    fs.writeFileSync(path.join(context.project, "STATE.json"), `${JSON.stringify({ ...prState, attemptCount: 1 }, null, 2)}\n`);
+    const clean = fetchGithubMergeEvidence({
+      projectPath: context.project, state: prState, projectId: "demo",
+      spawn: mergeEvidenceSpawn(["MERGEABLE"]), sleep: () => {}
+    });
+    assert.equal(clean.dirty, false);
+    fs.appendFileSync(path.join(context.project, "PLAN.md"), "real change\n");
+    const dirty = fetchGithubMergeEvidence({
+      projectPath: context.project, state: prState, projectId: "demo",
+      spawn: mergeEvidenceSpawn(["MERGEABLE"]), sleep: () => {}
+    });
+    assert.equal(dirty.dirty, true);
   } finally {
     cleanup(context);
   }

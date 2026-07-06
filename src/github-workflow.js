@@ -84,10 +84,14 @@ const CONDUCTOR_ARTIFACT_PATHS = Object.freeze([
 ]);
 
 export function dirtyIgnoringConductorArtifacts(porcelain) {
+  // The git() helper trims its output, so the first line may have lost the
+  // leading space of its two-column status (" M foo" -> "M foo"); strip the
+  // status token by pattern instead of by fixed offset.
   return porcelain
     .split(/\r?\n/u)
-    .filter((line) => line.trim() !== "")
-    .map((line) => line.slice(3).trim().replace(/^"|"$/gu, "").replace(/\\/gu, "/"))
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => line.replace(/^\S{1,2}\s+/u, "").trim().replace(/^"|"$/gu, "").replace(/\\/gu, "/"))
     .some((file) => !CONDUCTOR_ARTIFACT_PATHS.some((artifact) => artifact.endsWith("/") ? file.startsWith(artifact) : file === artifact));
 }
 
