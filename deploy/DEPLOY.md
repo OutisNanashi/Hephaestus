@@ -89,11 +89,17 @@ To opt into **Auto-merge Mode** for a finished task:
 node src/cli.js run-live --config hephaestus.vps.config.json --project <id> --auto-merge
 ```
 
-Auto-merge Mode runs only after exact `task-complete`: it commits the loop's
-pending work on the current task branch, runs the declared test commands and
-records the evidence (`record-tests`), then runs the existing `pr-open`,
-`merge-approve`, and `merge-execute` path; GPT approval and merge gates still
-decide whether anything merges.
+Auto-merge Mode drives the **whole project**: for each PLAN.md phase it runs
+the build loop, and only after exact `task-complete` commits the work, records
+test evidence (`record-tests`), opens the PR, gets scoped GPT approval, merges,
+and advances to the next phase (the brain reads PLAN.md and the build log to
+decide the next task). It repeats until the plan is complete, something blocks
+or pauses, or the phase budget is hit. GPT approval and merge gates still
+decide whether anything merges. So a supervised full build is one command:
+
+```sh
+node src/cli.js run-live --config hephaestus.vps.config.json --project <id> --auto-merge
+```
 
 Unattended, via systemd (one timer per project):
 
