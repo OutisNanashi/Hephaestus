@@ -187,6 +187,16 @@ test("ensureTaskBranch creates a branch on the base branch and is a no-op once o
     assert.equal(loadState(project).currentBranch, "hephaestus/demo/first-task");
     const second = ensureTaskBranch({ allowedRoot: root, projectPath: project, projectId: "demo" });
     assert.equal(second.created, false, "already on a task branch");
+    // Interrupted-run recovery: the previous run committed work on the task
+    // branch; a re-run lands back on a clean base with that branch still present
+    // and must reset it rather than fail with "branch already exists".
+    git(project, ["add", "-A"]);
+    git(project, ["commit", "-qm", "interrupted wip"]);
+    git(project, ["switch", "master"]);
+    const rerun = ensureTaskBranch({ allowedRoot: root, projectPath: project, projectId: "demo" });
+    assert.equal(rerun.created, true);
+    assert.equal(rerun.branch, "hephaestus/demo/first-task");
+    assert.equal(execFileSync("git", ["branch", "--show-current"], { cwd: project }).toString().trim(), "hephaestus/demo/first-task");
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

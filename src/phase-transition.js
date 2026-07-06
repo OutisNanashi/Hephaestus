@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fail } from "./errors.js";
-import { createTaskBranch, currentGitBranch, resetToBase } from "./git-workflow.js";
+import { currentGitBranch, ensureFreshTaskBranch, resetToBase } from "./git-workflow.js";
 import { requestNextPhasePlan } from "./phase-plan.js";
 import { validateProjectDirectory } from "./project.js";
 import { assertRealPathWithinRoot } from "./safe-path.js";
@@ -68,7 +68,7 @@ export function ensureTaskBranch({ allowedRoot, projectPath, projectId, base = "
   const validated = validateProjectDirectory(allowedRoot, projectPath);
   const current = currentGitBranch(validated.path);
   if (current !== base) return Object.freeze({ created: false, branch: current });
-  const branch = createTaskBranch(validated.path, projectId, validated.state.currentTask);
+  const branch = ensureFreshTaskBranch(validated.path, projectId, validated.state.currentTask);
   saveState(validated.path, { ...validated.state, currentBranch: branch });
   return Object.freeze({ created: true, branch });
 }
@@ -99,9 +99,10 @@ export async function advanceToNextPhase({ allowedRoot, projectPath, projectId, 
     return Object.freeze({ status: "all-complete", rationale: plan.rationale });
   }
 
-  // Create the branch on the clean base tree before writing files, so
-  // createTaskBranch's clean-tree guard holds; the writes land on the new branch.
-  const branch = createTaskBranch(validated.path, projectId, plan.taskId);
+  // Create the branch on the clean base tree before writing files, so the
+  // clean-tree guard holds; the writes land on the new branch. A stale branch
+  // from an interrupted advance is reset off base rather than blocking the run.
+  const branch = ensureFreshTaskBranch(validated.path, projectId, plan.taskId);
   const stalePath = path.join(validated.path, "AGENT_OUTPUT.md");
   if (fs.existsSync(stalePath)) fs.rmSync(stalePath, { force: true });
   writeCurrentTask(validated.path, plan.taskMarkdown);
