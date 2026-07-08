@@ -2,10 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { ADAPTER_IDS, getAdapter } from "./agent-adapters.js";
 import { fail } from "./errors.js";
+import { getProviderAdapter, PROVIDER_ADAPTER_IDS } from "./provider-adapters.js";
 import { resolveConfigPath } from "./safe-path.js";
 
 const REQUIRED_CONFIG_KEYS = ["allowedRoot", "registryPath", "logDirectory"];
-const OPTIONAL_CONFIG_KEYS = new Set(["notifications", "brain", "adapters"]);
+const OPTIONAL_CONFIG_KEYS = new Set(["notifications", "brain", "adapters", "providers"]);
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]*$/u;
 
 /** Load simple local KEY=value entries without replacing explicitly supplied environment values. */
@@ -69,6 +70,37 @@ function adaptersConfig(raw) {
       fail(`Configuration adapters.${adapterId}.enabled must be a boolean.`, "INVALID_CONFIG");
     }
     entries[adapterId] = Object.freeze({ enabled: settings.enabled });
+  }
+  return Object.freeze(entries);
+}
+
+// Per-provider live-execution gate. This only records intent; whether a provider is
+// actually live-executable is the AND of (adapter capability liveExecutable) and this
+// config. Absence of a provider entry never enables live execution beyond the adapter's
+// own default, so a missing "providers" block cannot accidentally enable Factory Droid.
+function providersConfig(raw) {
+  if (!raw || Array.isArray(raw) || typeof raw !== "object") fail("Configuration providers must be a JSON object.", "INVALID_CONFIG");
+  const entries = {};
+  for (const [providerId, settings] of Object.entries(raw)) {
+    if (!PROVIDER_ADAPTER_IDS.includes(providerId) || getProviderAdapter(providerId) === null) {
+      fail(`Configuration providers contains an unknown provider: ${providerId}.`, "INVALID_CONFIG");
+    }
+    if (!settings || Array.isArray(settings) || typeof settings !== "object") {
+      fail(`Configuration providers.${providerId} must be a JSON object.`, "INVALID_CONFIG");
+    }
+    const allowedKeys = ["enabled", "executionEnabled"];
+    if (Object.keys(settings).some((key) => !allowedKeys.includes(key))) {
+      fail(`Configuration providers.${providerId} contains an unsupported key.`, "INVALID_CONFIG");
+    }
+    for (const key of allowedKeys) {
+      if (settings[key] !== undefined && typeof settings[key] !== "boolean") {
+        fail(`Configuration providers.${providerId}.${key} must be a boolean.`, "INVALID_CONFIG");
+      }
+    }
+    const entry = {};
+    if (settings.enabled !== undefined) entry.enabled = settings.enabled;
+    if (settings.executionEnabled !== undefined) entry.executionEnabled = settings.executionEnabled;
+    entries[providerId] = Object.freeze(entry);
   }
   return Object.freeze(entries);
 }
@@ -140,6 +172,7 @@ export function loadConfig(configPath = path.resolve("hephaestus.config.json")) 
     logDirectory: resolveConfigPath(configDirectory, raw.logDirectory, "logDirectory"),
     ...(raw.notifications === undefined ? {} : { notifications: notificationConfig(raw.notifications) }),
     ...(raw.brain === undefined ? {} : { brain: brainConfig(raw.brain) }),
-    ...(raw.adapters === undefined ? {} : { adapters: adaptersConfig(raw.adapters) })
+    ...(raw.adapters === undefined ? {} : { adapters: adaptersConfig(raw.adapters) }),
+    ...(raw.providers === undefined ? {} : { providers: providersConfig(raw.providers) })
   });
 }

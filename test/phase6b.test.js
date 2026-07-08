@@ -12,7 +12,8 @@ import { loadConfig } from "../src/config.js";
 import { HephaestusError } from "../src/errors.js";
 import {
   getProviderAdapter, isProviderLiveExecutable, listLiveExecutableProviderIds,
-  listProviderAdapters, PROVIDER_ADAPTER_IDS, runProviderTask
+  listProviderAdapters, providerExecutionConfigured, PROVIDER_ADAPTER_IDS,
+  runProviderTask, selectLiveProvider
 } from "../src/provider-adapters.js";
 
 const validState = Object.freeze({
@@ -155,6 +156,80 @@ test("Factory Droid runTask refuses execution in preflight-only mode and never s
   assert.equal(result.classification, "PROVIDER_NOT_ENABLED");
   assert.equal(result.reason, "preflight-only");
   assert.match(result.detail, /not enabled/u);
+});
+
+test("provider live-execution gate defaults to Codex-only with no config present", () => {
+  assert.equal(isProviderLiveExecutable("codex"), true);
+  assert.equal(isProviderLiveExecutable("codex", null), true);
+  assert.equal(isProviderLiveExecutable("factory-droid"), false);
+  assert.deepEqual(listLiveExecutableProviderIds(null), ["codex"]);
+  // Preflight support is orthogonal to live execution and stays on for both providers.
+  assert.equal(getAdapter("codex").preflightSupported, true);
+  assert.equal(getAdapter("factory-droid").preflightSupported, true);
+});
+
+test("provider live-execution gate rejects unknown and known-but-not-live providers with distinct errors", () => {
+  assert.throws(() => selectLiveProvider("does-not-exist"), (error) => code(error, "PROVIDER_ADAPTER_NOT_AVAILABLE"));
+  assert.throws(() => selectLiveProvider("factory-droid"), (error) => code(error, "PROVIDER_NOT_LIVE_EXECUTABLE"));
+  assert.equal(selectLiveProvider("codex").id, "codex");
+});
+
+test("config can disable Codex live execution and cannot enable Factory beyond its capability", () => {
+  // Codex is opt-out: explicit executionEnabled:false disables it.
+  const codexOff = { providers: { codex: { enabled: true, executionEnabled: false } } };
+  assert.equal(isProviderLiveExecutable("codex", codexOff), false);
+  assert.deepEqual(listLiveExecutableProviderIds(codexOff), []);
+  assert.throws(() => selectLiveProvider("codex", { config: codexOff }), (error) => code(error, "PROVIDER_NOT_LIVE_EXECUTABLE"));
+
+  // Enabling Factory in config records intent but the capability gate still blocks it.
+  const factoryOn = { providers: { "factory-droid": { enabled: true, executionEnabled: true } } };
+  assert.equal(providerExecutionConfigured("factory-droid", factoryOn), true);
+  assert.equal(isProviderLiveExecutable("factory-droid", factoryOn), false);
+  assert.throws(() => selectLiveProvider("factory-droid", { config: factoryOn }), (error) => code(error, "PROVIDER_NOT_LIVE_EXECUTABLE"));
+  // Codex stays live under a config that only mentions Factory.
+  assert.equal(isProviderLiveExecutable("codex", factoryOn), true);
+});
+
+test("enabling Factory in config does not bypass its preflight-only runTask refusal, and preflight still runs", () => {
+  const factoryOn = { providers: { "factory-droid": { enabled: true, executionEnabled: true } } };
+  // Even fully "enabled" in config, direct execution refuses without spawning.
+  let spawned = false;
+  const result = runProviderTask("factory-droid", { spawn: () => { spawned = true; return {}; } });
+  assert.equal(spawned, false);
+  assert.equal(result.executed, false);
+  assert.equal(result.classification, "PROVIDER_NOT_ENABLED");
+  // Preflight is still permitted for the known provider while live execution is off.
+  assert.equal(isProviderLiveExecutable("factory-droid", factoryOn), false);
+  const spawn = fakeSpawn(() => ({ status: 0, stdout: "droid 2.4.1\n", stderr: "" }));
+  const report = getProviderAdapter("factory-droid").preflight({ env: { PATH: "/usr/bin" }, spawn });
+  assert.equal(report.available, true);
+  assert.equal(report.reason, "version-detected");
+});
+
+test("loadConfig validates the providers block and rejects unknown providers and bad shapes", () => {
+  const directory = temporaryDirectory();
+  try {
+    const allowedRoot = path.join(directory, "projects");
+    fs.mkdirSync(allowedRoot, { recursive: true });
+    const base = { allowedRoot: "./projects", registryPath: "./registry.json", logDirectory: "./logs" };
+    writeJson(path.join(directory, "ok.json"), { ...base, providers: { codex: { enabled: true }, "factory-droid": { enabled: false, executionEnabled: false } } });
+    const config = loadConfig(path.join(directory, "ok.json"));
+    assert.equal(config.providers["factory-droid"].executionEnabled, false);
+    // Config intent still cannot make Factory live-executable.
+    assert.equal(isProviderLiveExecutable("factory-droid", config), false);
+    assert.equal(isProviderLiveExecutable("codex", config), true);
+
+    writeJson(path.join(directory, "unknown.json"), { ...base, providers: { "claude-code": { enabled: true } } });
+    assert.throws(() => loadConfig(path.join(directory, "unknown.json")), (error) => code(error, "INVALID_CONFIG"));
+
+    writeJson(path.join(directory, "badkey.json"), { ...base, providers: { codex: { executionEnabled: true, bogus: 1 } } });
+    assert.throws(() => loadConfig(path.join(directory, "badkey.json")), (error) => code(error, "INVALID_CONFIG"));
+
+    writeJson(path.join(directory, "badtype.json"), { ...base, providers: { codex: { enabled: "yes" } } });
+    assert.throws(() => loadConfig(path.join(directory, "badtype.json")), (error) => code(error, "INVALID_CONFIG"));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("real adapters cannot execute tasks via runAgentTask and unknown adapters are rejected", () => {
