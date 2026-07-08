@@ -1,8 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fail, HephaestusError } from "./errors.js";
+import { getProviderAdapter } from "./provider-adapters.js";
 import { resolveSafePath, assertRealPathWithinRoot } from "./safe-path.js";
 import { validateState } from "./state.js";
+
+const DEFAULT_PROVIDER = "codex";
 
 const PROJECT_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CONTAINER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
@@ -67,14 +70,21 @@ function normalizePaths(raw, projectPath) {
 
 function normalizeProject(raw, allowedRoot, index) {
   if (!raw || Array.isArray(raw) || typeof raw !== "object") fail(`Registry project at index ${index} must be an object.`, "INVALID_MULTI_PROJECT_REGISTRY");
-  const allowedKeys = ["id", "path", "assignedAgent", "container", "paths"];
+  const allowedKeys = ["id", "path", "assignedAgent", "container", "paths", "provider"];
   if (Object.keys(raw).some((key) => !allowedKeys.includes(key))) fail(`Registry project at index ${index} contains unsupported keys.`, "INVALID_MULTI_PROJECT_REGISTRY");
   const id = nonEmptyText(raw.id, `Registry project at index ${index} id`);
   if (!PROJECT_ID.test(id)) fail(`Registry project at index ${index} has an invalid id.`, "INVALID_MULTI_PROJECT_REGISTRY");
   const configuredPath = resolveSafePath(allowedRoot, nonEmptyText(raw.path, `Registry project at index ${index} path`));
   const projectPath = fs.existsSync(configuredPath) ? assertRealPathWithinRoot(allowedRoot, configuredPath) : configuredPath;
   const assignedAgent = raw.assignedAgent === undefined ? "unassigned" : nonEmptyText(raw.assignedAgent, "Project assigned agent");
-  return Object.freeze({ id, path: projectPath, assignedAgent, container: normalizeContainer(raw.container, id), paths: normalizePaths(raw.paths, projectPath) });
+  // An absent provider defaults to Codex (preserving legacy registries); only a known
+  // provider id is accepted here. Live-execution eligibility is enforced separately.
+  const providerDeclared = raw.provider !== undefined;
+  if (providerDeclared && (typeof raw.provider !== "string" || getProviderAdapter(raw.provider) === null)) {
+    fail(`Registry project at index ${index} declares an unknown provider: ${raw.provider}.`, "INVALID_MULTI_PROJECT_REGISTRY");
+  }
+  const provider = providerDeclared ? raw.provider : DEFAULT_PROVIDER;
+  return Object.freeze({ id, path: projectPath, assignedAgent, provider, providerDeclared, container: normalizeContainer(raw.container, id), paths: normalizePaths(raw.paths, projectPath) });
 }
 
 function assertUniqueProjects(projects) {

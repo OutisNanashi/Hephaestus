@@ -68,6 +68,35 @@ optional `provider` field in the project registry:
   optional `providers` block (`{ "<id>": { "enabled": bool, "executionEnabled": bool } }`);
   a missing block leaves Codex live-executable and every non-capable provider off.
 
+### Inspecting provider readiness
+
+`status --providers` reports, per project and read-only (no state changes, no
+network), the declared vs. defaulted provider and its readiness. Add
+`--preflight` to also run a safe, non-spending `--version` probe of each
+provider's CLI:
+
+```sh
+node src/cli.js status --providers              # readiness only; spawns nothing
+node src/cli.js status --providers --preflight  # also runs safe --version probes
+```
+
+Each row distinguishes four separate concepts:
+
+- **known** — the declared id resolves to a registered provider adapter
+  (unknown ids are rejected earlier, at registry load).
+- **preflightSupported** — the adapter advertises a safe availability probe.
+- **configured** — whether a `providers` entry opts the provider into live
+  execution (`executionEnabled`), independent of capability.
+- **liveExecutable** — the AND of adapter capability and config; only when this
+  is true may `run-live` execute the provider. When false, a `reason` is given
+  (`unknown-provider`, `not-live-executable-capability`, or `disabled-by-config`).
+
+Today this means Codex reports `liveExecutable: true`, while **Factory Droid
+reports `known: true`, `preflightSupported: true`, `liveExecutable: false`
+(`not-live-executable-capability`)** — it stays preflight-only until the real
+Factory execution adapter is implemented. Any preflight output is redacted of
+secret-like text before it is printed.
+
 ## Safety model
 
 - Codex may only write inside the selected project; conductor-owned files
