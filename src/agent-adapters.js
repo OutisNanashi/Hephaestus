@@ -1,6 +1,31 @@
 import { fail } from "./errors.js";
+import { defineProviderCapabilities } from "./provider-adapter-contract.js";
 
 const REAL_AGENT_REASON = "Real coding agents do not run through the generic fixture sandbox path; Codex runs via the dedicated workspace exec module.";
+
+export const CODEX_PROVIDER_CAPABILITIES = defineProviderCapabilities({
+  localProcess: true,
+  headless: true,
+  nonInteractive: true,
+  longRunning: true,
+  directPromptArg: true,
+  promptFile: true,
+  nativeSandbox: true,
+  supportsWorkspaceWrite: true,
+  supportsReadOnly: true,
+  protectedFileFingerprintingRequired: true,
+  shellFalseSupported: true,
+  safeEnvAllowlistSupported: true,
+  stdoutCapture: true,
+  stderrCapture: true,
+  structuredReport: true,
+  usageLimitDetectable: true,
+  retryAfterDetectable: true,
+  rateLimitIsProviderScoped: true,
+  canEditWorktree: true,
+  conductorOwnsGit: true,
+  supportsPreflight: true
+});
 
 const ADAPTERS = Object.freeze({
   "fixture-agent": Object.freeze({
@@ -36,7 +61,8 @@ const ADAPTERS = Object.freeze({
   codex: Object.freeze({
     id: "codex", displayName: "Codex", kind: "real",
     executionAllowed: false, preflightSupported: true, defaultEnabled: false,
-    disabledReason: REAL_AGENT_REASON, expectedExecutable: "codex", fixtureCommandId: null
+    disabledReason: REAL_AGENT_REASON, expectedExecutable: "codex", fixtureCommandId: null,
+    capabilities: CODEX_PROVIDER_CAPABILITIES
   }),
   "claude-code": Object.freeze({
     id: "claude-code", displayName: "Claude Code", kind: "real",

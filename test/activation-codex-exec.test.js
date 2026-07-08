@@ -10,6 +10,7 @@ import {
   PROTECTED_PROJECT_FILES,
   WORKSPACE_CLASSIFICATIONS
 } from "../src/agent-codex-workspace-exec.js";
+import { getProviderAdapter, runProviderTask } from "../src/provider-adapters.js";
 import { loadState } from "../src/state.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
 
@@ -123,6 +124,41 @@ test("successful run persists output, run report, state, and append-only log", (
   } finally { cleanup(context); }
 });
 
+test("Codex provider adapter delegates successful runs without changing prompt delivery, sandbox, output, or state", () => {
+  const context = makeProject();
+  const capture = {};
+  try {
+    const result = runProviderTask("codex", execRequest(context, {
+      spawn: fakeSpawn({ status: 0, stdout: "Adapter path implemented and tested.\n", stderr: "" }, capture)
+    }));
+    const adapter = getProviderAdapter("codex");
+    assert.equal(result.classification, WORKSPACE_CLASSIFICATIONS.PASS);
+    assert.equal(adapter.classifyResult(result), WORKSPACE_CLASSIFICATIONS.PASS);
+    assert.equal(adapter.detectUsageLimit(result), false);
+    assert.equal(capture.executable, "codex");
+    assert.deepEqual(capture.args.slice(0, 5), ["exec", "--sandbox", "workspace-write", "--color", "never"]);
+    assert.equal(capture.args.at(-1), PROMPT_TEXT);
+    assert.equal(capture.options.cwd, context.project);
+    assert.equal(capture.options.shell, false);
+    assert.equal(capture.options.input, "");
+
+    const deliveredPrompt = path.join(context.project, "out", "agent_runs", "current", "prompt.md");
+    assert.equal(fs.readFileSync(deliveredPrompt, "utf8"), PROMPT_TEXT);
+    assert.ok(fs.readFileSync(result.agentOutputPath, "utf8").includes("Adapter path implemented and tested."));
+    const report = JSON.parse(fs.readFileSync(result.reportPath, "utf8"));
+    assert.equal(report.invocation.sandbox, "workspace-write");
+    assert.equal(report.invocation.dangerousBypass, false);
+    assert.deepEqual(adapter.collectArtifacts(result), { agentOutputPath: result.agentOutputPath, reportPath: result.reportPath });
+
+    const state = loadState(context.project);
+    assert.equal(state.nextAction, "agent-completed");
+    assert.equal(state.lastSuccessfulStep, "agent-run");
+    assert.equal(state.blocked, false);
+    assert.equal(state.agent.status, "completed");
+    assert.equal(state.agent.adapterId, "codex");
+  } finally { cleanup(context); }
+});
+
 test("state transitions to agent-running while the process executes", () => {
   const context = makeProject();
   try {
@@ -150,6 +186,25 @@ test("usage-limit output pauses the project and captures the retry hint", () => 
     assert.equal(state.blocked, false);
     assert.equal(state.agent.status, "paused");
     assert.equal(state.nextAction, "agent-usage-limit-paused");
+  } finally { cleanup(context); }
+});
+
+test("Codex provider adapter preserves usage-limit classification and paused mapping", () => {
+  const context = makeProject();
+  try {
+    const result = runProviderTask("codex", execRequest(context, {
+      spawn: fakeSpawn({ status: 1, stdout: "", stderr: "You've hit your usage limit. Try again at 7:30 PM UTC." })
+    }));
+    const adapter = getProviderAdapter("codex");
+    assert.equal(result.classification, WORKSPACE_CLASSIFICATIONS.USAGE_LIMIT);
+    assert.equal(result.retryAfter, "7:30 PM UTC");
+    assert.equal(adapter.detectUsageLimit(result), true);
+    const state = loadState(context.project);
+    assert.equal(state.nextAction, "agent-usage-limit-paused");
+    assert.equal(state.usageLimitPaused, true);
+    assert.equal(state.blocked, false);
+    assert.equal(state.agent.status, "paused");
+    assert.equal(state.agent.errorCategory, "usage-limit");
   } finally { cleanup(context); }
 });
 
@@ -190,6 +245,21 @@ test("an agent-reported BLOCKED marker becomes a blocked state", () => {
     assert.equal(result.classification, WORKSPACE_CLASSIFICATIONS.AGENT_BLOCKER);
     const state = loadState(context.project);
     assert.equal(state.blocked, true);
+    assert.equal(state.agent.blockerDetected, true);
+  } finally { cleanup(context); }
+});
+
+test("Codex provider adapter preserves agent-blocker classification and blocked mapping", () => {
+  const context = makeProject();
+  try {
+    const result = runProviderTask("codex", execRequest(context, {
+      spawn: fakeSpawn({ status: 0, stdout: "BLOCKED: waiting on owner decision\n", stderr: "" })
+    }));
+    assert.equal(result.classification, WORKSPACE_CLASSIFICATIONS.AGENT_BLOCKER);
+    const state = loadState(context.project);
+    assert.equal(state.nextAction, "agent-blocked");
+    assert.equal(state.blocked, true);
+    assert.equal(state.agent.status, "blocked");
     assert.equal(state.agent.blockerDetected, true);
   } finally { cleanup(context); }
 });

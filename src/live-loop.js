@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { runCodexWorkspaceExec, WORKSPACE_CLASSIFICATIONS } from "./agent-codex-workspace-exec.js";
+import { WORKSPACE_CLASSIFICATIONS } from "./agent-codex-workspace-exec.js";
 import { fail } from "./errors.js";
 import { inspectProject } from "./inspection.js";
+import { runProviderTask } from "./provider-adapters.js";
 import { runLiveBrainCycle } from "./live-brain.js";
 import {
   createNotificationEvent, createTelegramTransportFromEnvironment,
@@ -117,7 +118,7 @@ export async function runLiveLoop({
       return finish("blocked", `GPT reports automation cannot safely continue: ${brainCycle.decision.rationale}`, brainCycle.decision.nextAction, phase);
     }
 
-    const exec = runCodexWorkspaceExec({
+    const exec = runProviderTask("codex", {
       allowedRoot,
       projectPath,
       projectId,

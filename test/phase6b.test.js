@@ -10,6 +10,7 @@ import { runAgentPreflight } from "../src/agent-preflight.js";
 import { run as runCli } from "../src/cli.js";
 import { loadConfig } from "../src/config.js";
 import { HephaestusError } from "../src/errors.js";
+import { getProviderAdapter, listProviderAdapters, PROVIDER_ADAPTER_IDS } from "../src/provider-adapters.js";
 
 const validState = Object.freeze({
   currentPhase: "6B", currentTask: "real-adapter-boundary", currentBranch: "main", currentPr: null,
@@ -72,6 +73,26 @@ test("registry exposes fixture, codex, claude-code, and opencode adapters with c
   assert.throws(() => requireAdapter("unknown-agent"), (error) => code(error, "AGENT_ADAPTER_NOT_AVAILABLE"));
 });
 
+test("Codex provider adapter exposes capability metadata without enabling new providers", () => {
+  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex"]);
+  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex"]);
+  const codex = getProviderAdapter("codex");
+  assert.ok(codex);
+  assert.equal(codex.displayName, "Codex");
+  assert.equal(codex.capabilities.localProcess, true);
+  assert.equal(codex.capabilities.headless, true);
+  assert.equal(codex.capabilities.nonInteractive, true);
+  assert.equal(codex.capabilities.nativeSandbox, true);
+  assert.equal(codex.capabilities.supportsWorkspaceWrite, true);
+  assert.equal(codex.capabilities.shellFalseSupported, true);
+  assert.equal(codex.capabilities.safeEnvAllowlistSupported, true);
+  assert.equal(codex.capabilities.usageLimitDetectable, true);
+  assert.equal(codex.capabilities.conductorOwnsGit, true);
+  assert.equal(codex.capabilities.canMergeAfterApproval, false);
+  assert.equal(getProviderAdapter("claude-code"), null);
+  assert.equal(getProviderAdapter("factory-droid"), null);
+});
+
 test("real adapters cannot execute tasks via runAgentTask and unknown adapters are rejected", () => {
   const context = makeContext();
   try {
@@ -115,6 +136,19 @@ test("preflight on a real adapter does not mutate project files and reports unav
     assert.equal(fs.readFileSync(path.join(context.projectPath, "STATE.json"), "utf8"), stateBefore);
     assert.equal(fs.existsSync(path.join(context.projectPath, "AGENT_OUTPUT.md")), false);
   } finally { fs.rmSync(context.directory, { recursive: true, force: true }); }
+});
+
+test("Codex adapter preflight stays harmless and matches capability metadata", () => {
+  const spawn = fakeSpawn(() => ({ status: 0, stdout: "codex 0.1.0\n", stderr: "" }));
+  const report = runAgentPreflight({ adapterId: "codex", env: { PATH: "/usr/bin" }, spawn });
+  const adapter = getProviderAdapter("codex");
+  assert.equal(report.adapterId, "codex");
+  assert.equal(report.available, true);
+  assert.equal(report.preflightSupported, true);
+  assert.equal(adapter.capabilities.supportsPreflight, true);
+  assert.equal(fakeSpawn.lastCall.executable, "codex");
+  assert.deepEqual(fakeSpawn.lastCall.args, ["--version"]);
+  assert.equal(fakeSpawn.lastCall.shell, false);
 });
 
 test("preflight reports available when the version probe succeeds and redacts apparent secrets", () => {
