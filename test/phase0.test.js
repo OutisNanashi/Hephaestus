@@ -133,9 +133,32 @@ test("project registry validates ids and resolves registered project paths", () 
     fs.mkdirSync(root);
     writeJson(path.join(directory, "registry.json"), { projects: [{ id: "demo-project", path: "demo-project" }] });
     const projects = loadProjectRegistry(path.join(directory, "registry.json"), root);
-    assert.deepEqual(projects, [{ id: "demo-project", path: path.join(root, "demo-project") }]);
+    assert.deepEqual(projects, [{ id: "demo-project", path: path.join(root, "demo-project"), provider: "codex" }]);
     writeJson(path.join(directory, "bad-registry.json"), { projects: [{ id: "Bad Id", path: "demo-project" }] });
     assert.throws(() => loadProjectRegistry(path.join(directory, "bad-registry.json"), root), (error) => assertCode(error, "INVALID_REGISTRY"));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("registry accepts an explicit provider, defaults to Codex, and rejects unknown provider ids", () => {
+  const directory = temporaryDirectory();
+  try {
+    const root = path.join(directory, "projects");
+    fs.mkdirSync(root);
+    // Explicit codex, explicit known-but-not-live factory-droid, and a default (absent).
+    writeJson(path.join(directory, "registry.json"), { projects: [
+      { id: "codex-project", path: "codex-project", provider: "codex" },
+      { id: "factory-project", path: "factory-project", provider: "factory-droid" },
+      { id: "default-project", path: "default-project" }
+    ] });
+    const projects = loadProjectRegistry(path.join(directory, "registry.json"), root);
+    assert.equal(projects.find((p) => p.id === "codex-project").provider, "codex");
+    assert.equal(projects.find((p) => p.id === "factory-project").provider, "factory-droid");
+    assert.equal(projects.find((p) => p.id === "default-project").provider, "codex");
+
+    writeJson(path.join(directory, "unknown.json"), { projects: [{ id: "bad", path: "bad", provider: "devin" }] });
+    assert.throws(() => loadProjectRegistry(path.join(directory, "unknown.json"), root), (error) => assertCode(error, "INVALID_REGISTRY"));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

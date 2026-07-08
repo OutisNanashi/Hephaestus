@@ -3,6 +3,7 @@ import { AUTO_MERGE_MODE, finishRunLive, MANUAL_MERGE_MODE } from "./auto-merge.
 import { runLiveLoop } from "./live-loop.js";
 import { advanceToNextPhase, ensureTaskBranch } from "./phase-transition.js";
 import { validateProjectDirectory } from "./project.js";
+import { selectLiveProvider } from "./provider-adapters.js";
 
 // A single run advances at most this many phases, so a confused brain can never
 // spin the loop forever. The systemd timer resumes anything that hits the cap.
@@ -44,6 +45,12 @@ function loopArgs({ config, project, task, maxCycles }) {
  * a resumed chain follows the plan, not a stale one-off task.
  */
 export async function orchestrateRunLive({ mode = MANUAL_MERGE_MODE, config, project, task, maxCycles, deps = DEFAULT_DEPS }) {
+  // Enforce the provider gate before any branch prep or task execution. The project's
+  // declared provider (default Codex) must be both a known adapter and live-executable
+  // under the current config. Unknown ids fail with PROVIDER_ADAPTER_NOT_AVAILABLE and
+  // known-but-not-live ids (e.g. Factory Droid) with PROVIDER_NOT_LIVE_EXECUTABLE, so a
+  // non-executable provider stops here rather than running any task. Only Codex passes today.
+  selectLiveProvider(project.provider ?? "codex", { config });
   if (mode === MANUAL_MERGE_MODE) {
     const loop = await deps.runLiveLoop(loopArgs({ config, project, task, maxCycles }));
     const finished = await finishRunLive({ mode, config, project, loop });

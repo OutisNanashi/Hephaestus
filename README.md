@@ -38,6 +38,36 @@ onboarding a project is: write its `PLAN.md`, register it, run once.
 `task-complete`, leaving `pr-open`, `merge-approve`, `merge-execute`, and
 `next-phase` as a supervised chain you drive yourself.
 
+## Providers
+
+Each registered project may declare which coding-agent provider it uses via an
+optional `provider` field in the project registry:
+
+```json
+{
+  "projects": [
+    { "id": "prism", "path": "prism", "provider": "codex" }
+  ]
+}
+```
+
+- **Default:** a project with no `provider` field defaults to `codex`, so
+  existing registries keep working unchanged.
+- **Codex is currently the only executable provider.** `run-live` resolves the
+  project's provider through the live-execution gate (`selectLiveProvider`)
+  before any branch prep or task execution; only Codex passes today.
+- **Factory Droid (`factory-droid`) is preflight-only.** It is a *known*
+  provider — you can register it and run preflight/status inspection against the
+  `droid` CLI — but it is not live-executable. A project declaring
+  `factory-droid` is accepted by the registry yet fails fast with a clear
+  `PROVIDER_NOT_LIVE_EXECUTABLE` error before any task runs, until the real
+  Factory execution adapter is implemented. Enabling it in the `providers`
+  config block does not bypass this; the adapter capability gate still blocks it.
+- Unknown provider ids are rejected at registry load with `INVALID_REGISTRY`.
+- Live execution can be gated per provider in `hephaestus.config.json` via an
+  optional `providers` block (`{ "<id>": { "enabled": bool, "executionEnabled": bool } }`);
+  a missing block leaves Codex live-executable and every non-capable provider off.
+
 ## Safety model
 
 - Codex may only write inside the selected project; conductor-owned files

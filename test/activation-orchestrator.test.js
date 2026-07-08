@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AUTO_MERGE_MODE, MANUAL_MERGE_MODE } from "../src/auto-merge.js";
+import { HephaestusError } from "../src/errors.js";
 import { orchestrateRunLive, MAX_PHASES_PER_RUN } from "../src/run-live-orchestrator.js";
 
 const config = { allowedRoot: ".", brain: { model: "m" }, notifications: {} };
@@ -105,4 +106,50 @@ test("Manual mode runs one build loop and does not chain or merge", async () => 
   assert.equal(box.builds, 1);
   assert.equal(box.merges, 0, "manual mode never auto-merges");
   assert.equal(box.advances, 0, "manual mode never auto-advances");
+});
+
+function codeIs(expected) {
+  return (error) => { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; };
+}
+
+test("run-live routes a Codex (default and explicit) project through the existing build path", async () => {
+  for (const codexProject of [{ id: "demo", path: "demo" }, { id: "demo", path: "demo", provider: "codex" }]) {
+    const { deps, box } = harness();
+    const result = await orchestrateRunLive({ mode: MANUAL_MERGE_MODE, config, project: codexProject, deps });
+    assert.equal(result.outcome, "task-complete");
+    assert.equal(box.builds, 1, "Codex project still executes exactly one build loop");
+  }
+});
+
+test("run-live rejects a factory-droid project before executing any task (not live-executable)", async () => {
+  const factoryProject = { id: "demo", path: "demo", provider: "factory-droid" };
+  for (const mode of [MANUAL_MERGE_MODE, AUTO_MERGE_MODE]) {
+    const { deps, box } = harness();
+    await assert.rejects(
+      orchestrateRunLive({ mode, config, project: factoryProject, deps }),
+      codeIs("PROVIDER_NOT_LIVE_EXECUTABLE")
+    );
+    assert.equal(box.builds, 0, "no build loop runs for a non-live provider");
+    assert.equal(box.prepares, 0, "no branch prep runs for a non-live provider");
+    assert.equal(box.merges, 0);
+  }
+});
+
+test("run-live rejects an unknown provider before executing any task", async () => {
+  const { deps, box } = harness();
+  await assert.rejects(
+    orchestrateRunLive({ mode: MANUAL_MERGE_MODE, config, project: { id: "demo", path: "demo", provider: "devin" }, deps }),
+    codeIs("PROVIDER_ADAPTER_NOT_AVAILABLE")
+  );
+  assert.equal(box.builds, 0);
+});
+
+test("config disabling Codex live execution stops run-live before any build", async () => {
+  const { deps, box } = harness();
+  const codexOff = { ...config, providers: { codex: { executionEnabled: false } } };
+  await assert.rejects(
+    orchestrateRunLive({ mode: MANUAL_MERGE_MODE, config: codexOff, project: { id: "demo", path: "demo", provider: "codex" }, deps }),
+    codeIs("PROVIDER_NOT_LIVE_EXECUTABLE")
+  );
+  assert.equal(box.builds, 0);
 });
