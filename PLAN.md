@@ -146,7 +146,7 @@ The intended initial Hephaestus builder-agent stack is.
 ```text
 Claude Code
 OpenAI Codex
-Cursor Agent
+Cursor Agent + Grok 4.5
 OpenCode + GLM-5.2
 Devin
 Factory Droid
@@ -720,7 +720,7 @@ Test repair
 Cloud tasks
 Isolated feature branches
 ```
-Cursor Agent
+Cursor Agent + Grok 4.5
 Use for.
 ```text
 Hands-on IDE work
