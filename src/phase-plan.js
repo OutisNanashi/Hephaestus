@@ -8,8 +8,31 @@ const PLAN_JSON_SUFFIX = "\n\nRespond with ONLY one valid JSON object. When anot
 const TASK_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const MAX_TASK_MARKDOWN = 8_000;
 const SECRET_HINT = /openai[-_ ]?api[-_ ]?key|bearer\s+[a-z0-9._-]{12,}|sk-[a-z0-9]{16,}/iu;
+const PHASE_HEADING = /^\s*(?:#{1,6}\s*)?Phase\s+([A-Za-z0-9._-]+)\b.*$/gimu;
 
-function validatePhasePlan(raw) {
+export function extractPlanPhaseIds(planContext) {
+  if (typeof planContext !== "string") return Object.freeze([]);
+  const phases = [];
+  for (const match of planContext.matchAll(PHASE_HEADING)) {
+    const phase = match[1]?.trim();
+    if (phase && !phases.includes(phase)) phases.push(phase);
+  }
+  return Object.freeze(phases);
+}
+
+function deterministicCompletion(planContext, currentPhase) {
+  const phases = extractPlanPhaseIds(planContext);
+  const current = String(currentPhase ?? "").trim();
+  if (phases.length === 0 || current === "") return null;
+  const index = phases.indexOf(current);
+  if (index !== phases.length - 1) return null;
+  return Object.freeze({
+    status: "all-complete",
+    rationale: `Every phase in PLAN.md is built and merged through Phase ${current}.`
+  });
+}
+
+function validatePhasePlan(raw, { phaseIds = Object.freeze([]), currentPhase = null } = {}) {
   if (raw === null || Array.isArray(raw) || typeof raw !== "object") fail("Phase plan must be a JSON object.", "INVALID_PHASE_PLAN");
   if (raw.status === "all-complete") {
     if (Object.keys(raw).some((key) => !["status", "rationale"].includes(key))) fail("all-complete phase plan must contain only status and rationale.", "INVALID_PHASE_PLAN");
@@ -21,6 +44,8 @@ function validatePhasePlan(raw) {
   if (keys.some((key) => !(key in raw)) || Object.keys(raw).some((key) => !keys.includes(key))) fail("phase-ready phase plan must contain exactly status, phase, taskId, taskMarkdown, rationale.", "INVALID_PHASE_PLAN");
   const phase = typeof raw.phase === "string" ? raw.phase.trim() : String(raw.phase ?? "");
   if (phase === "") fail("Phase plan phase must be a non-empty value.", "INVALID_PHASE_PLAN");
+  if (phaseIds.length > 0 && !phaseIds.includes(phase)) fail(`Phase plan references Phase ${phase}, which is not declared in PLAN.md.`, "INVALID_PHASE_PLAN");
+  if (currentPhase !== null && String(currentPhase).trim() === phase) fail("Phase plan must not repeat the current phase.", "INVALID_PHASE_PLAN");
   if (typeof raw.taskId !== "string" || !TASK_ID.test(raw.taskId)) fail("Phase plan taskId must be a lowercase hyphenated slug.", "INVALID_PHASE_PLAN");
   if (typeof raw.taskMarkdown !== "string" || raw.taskMarkdown.trim() === "") fail("Phase plan taskMarkdown must be a non-empty string.", "INVALID_PHASE_PLAN");
   if (raw.taskMarkdown.length > MAX_TASK_MARKDOWN) fail("Phase plan taskMarkdown is too large.", "INVALID_PHASE_PLAN");
@@ -53,11 +78,14 @@ ${log}`;
 /** Ask GPT for the next unbuilt phase and its bounded task, or all-complete. Never writes files. */
 export async function requestNextPhasePlan({ apiKey, model, planContext, buildLog, currentPhase, fetchImpl }) {
   if (typeof planContext !== "string" || planContext.trim() === "") fail("Phase planning requires PLAN.md context.", "INVALID_PHASE_PLAN_REQUEST");
+  const complete = deterministicCompletion(planContext, currentPhase);
+  if (complete) return complete;
+  const phaseIds = extractPlanPhaseIds(planContext);
   return requestOpenAIStructured({
     apiKey,
     model,
     input: planInput({ planContext, buildLog, currentPhase }),
-    validate: validatePhasePlan,
+    validate: (raw) => validatePhasePlan(raw, { phaseIds, currentPhase }),
     strictSuffix: PLAN_JSON_SUFFIX,
     failureCode: "INVALID_PHASE_PLAN",
     fetchImpl

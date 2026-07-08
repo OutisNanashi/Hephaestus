@@ -147,9 +147,13 @@ export function sandboxContainerExists(name) {
 export function checkSandboxHealth(allowedRoot, projectPath) {
   const projectState = inspectProject(allowedRoot, projectPath);
   const name = containerName();
+  const healthScript = [
+    "test -d /workspace || { printf 'workspace directory is not mounted\\n' >&2; exit 1; }",
+    "test -r /workspace/PLAN.md || { printf 'workspace PLAN.md is not readable by sandbox user\\n' >&2; exit 1; }"
+  ].join("; ");
   let result;
   try {
-    result = dockerResult(sandboxArgs(projectState.projectPath, name, "test -d /workspace && test -r /workspace/PLAN.md"));
+    result = dockerResult(sandboxArgs(projectState.projectPath, name, healthScript));
   } finally {
     cleanupSandbox(name);
   }

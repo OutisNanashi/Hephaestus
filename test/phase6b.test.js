@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { containerReadableTemporaryDirectory, makeTreeContainerReadable } from "./helpers/writable-temp.js";
 import { withEmptyPath } from "./helpers/spawned-cli.js";
 import { runAgentTask } from "../src/agent.js";
 import { ADAPTER_IDS, getAdapter, listAdapters, redactPreflightText, requireAdapter } from "../src/agent-adapters.js";
@@ -17,7 +18,7 @@ const validState = Object.freeze({
   containerStatus: "not-started", lastGptDecision: null, nextAction: "agent-run"
 });
 
-function temporaryDirectory() { return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-")); }
+function temporaryDirectory() { return containerReadableTemporaryDirectory("hephaestus-6b-"); }
 function writeJson(filePath, value) { fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`); }
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
 
@@ -34,6 +35,7 @@ function makeContext() {
   })) fs.writeFileSync(path.join(projectPath, name), content);
   writeJson(path.join(projectPath, "STATE.json"), validState);
   fs.writeFileSync(path.join(projectPath, "out", "prompts", "next-task.md"), "# Delivered prompt\n\nDo the declared task.\n");
+  makeTreeContainerReadable(directory);
   return { directory, allowedRoot, projectPath, promptPath: "out/prompts/next-task.md" };
 }
 

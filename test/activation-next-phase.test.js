@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { HephaestusError } from "../src/errors.js";
-import { requestNextPhasePlan } from "../src/phase-plan.js";
+import { extractPlanPhaseIds, requestNextPhasePlan } from "../src/phase-plan.js";
 import { advanceToNextPhase, ensureTaskBranch } from "../src/phase-transition.js";
 import { loadState } from "../src/state.js";
 import { writableTemporaryDirectory } from "./helpers/writable-temp.js";
@@ -96,17 +96,39 @@ function code(error, expected) {
 test("phase plan validation accepts both shapes and rejects malformed output", () => {
   const capture = {};
   return (async () => {
+    assert.deepEqual(extractPlanPhaseIds(PLAN), ["1", "2", "3"]);
     const ready = await requestNextPhasePlan({ apiKey: "k", model: "m", planContext: PLAN, buildLog: "phase 1 merged", currentPhase: "1", fetchImpl: phaseFetch(readyPlan, capture) });
     assert.equal(ready.status, "phase-ready");
     assert.equal(ready.taskId, "second-task");
     assert.match(capture.requests[0].input, /phase planner/u);
-    const done = await requestNextPhasePlan({ apiKey: "k", model: "m", planContext: PLAN, currentPhase: "3", fetchImpl: phaseFetch({ status: "all-complete", rationale: "All three phases built." }) });
+    const done = await requestNextPhasePlan({
+      apiKey: "k",
+      model: "m",
+      planContext: PLAN,
+      currentPhase: "3",
+      fetchImpl: async () => { throw new Error("the model must not be called when the current phase is the final declared phase"); }
+    });
     assert.equal(done.status, "all-complete");
+    assert.match(done.rationale, /Phase 3/u);
     // Bad slug, oversized/secret markdown, and unknown status are all rejected after the strict retry.
     await assert.rejects(() => requestNextPhasePlan({ apiKey: "k", model: "m", planContext: PLAN, currentPhase: "1", fetchImpl: phaseFetch({ ...readyPlan, taskId: "Bad Slug!" }) }), (error) => code(error, "INVALID_PHASE_PLAN"));
     await assert.rejects(() => requestNextPhasePlan({ apiKey: "k", model: "m", planContext: PLAN, currentPhase: "1", fetchImpl: phaseFetch({ ...readyPlan, taskMarkdown: "sk-abcdef0123456789abcdef" }) }), (error) => code(error, "INVALID_PHASE_PLAN"));
     await assert.rejects(() => requestNextPhasePlan({ apiKey: "k", model: "m", planContext: PLAN, currentPhase: "1", fetchImpl: phaseFetch({ status: "weird" }) }), (error) => code(error, "INVALID_PHASE_PLAN"));
   })();
+});
+
+test("phase planner rejects placeholder next phases not declared in PLAN.md", async () => {
+  const placeholder = {
+    status: "phase-ready",
+    phase: "4",
+    taskId: "phase-4-next-task",
+    taskMarkdown: "# Current task: phase-4-next-task\n\nNo Phase 4 exists.\n",
+    rationale: "Try a placeholder next task."
+  };
+  await assert.rejects(
+    () => requestNextPhasePlan({ apiKey: "k", model: "m", planContext: PLAN, currentPhase: "2", fetchImpl: phaseFetch(placeholder) }),
+    (error) => code(error, "INVALID_PHASE_PLAN")
+  );
 });
 
 test("advancing a merged project resets to base, branches, writes the task, and advances state", async () => {
@@ -150,14 +172,25 @@ test("advancing refuses a project whose current phase is not merged and changes 
 });
 
 test("all-complete marks the project done on base without creating a branch", async () => {
-  const context = makeProject();
+  const context = makeProject({ state: { ...mergedState, currentPhase: "3", currentTask: "third-task", currentBranch: "hephaestus/demo/third-task" } });
   try {
-    const result = await advance(context, { status: "all-complete", rationale: "Every phase in PLAN.md is built and merged." });
+    const result = await advance(context, {
+      status: "phase-ready",
+      phase: "4",
+      taskId: "phase-4-next-task",
+      taskMarkdown: "# Current task: phase-4-next-task\n\nNo Phase 4 exists.\n",
+      rationale: "Placeholder output that must be ignored because Phase 3 is final."
+    });
     assert.equal(result.status, "all-complete");
     const state = loadState(context.project);
     assert.equal(state.nextAction, "project-complete");
     assert.equal(state.currentBranch, "master");
+    assert.equal(state.blocked, false);
+    assert.equal(state.currentPhase, "3");
+    assert.equal(state.currentTask, "third-task");
+    assert.equal("agent" in state, false, "completion must clear stale agent report");
     assert.equal(execFileSync("git", ["branch", "--show-current"], { cwd: context.project }).toString().trim(), "master");
+    assert.doesNotMatch(fs.readFileSync(path.join(context.project, "CURRENT_TASK.md"), "utf8"), /phase-4-next-task/u);
     assert.match(fs.readFileSync(path.join(context.project, "BUILD_LOG.md"), "utf8"), /\[next-phase\] all phases complete/u);
   } finally { cleanup(context); }
 });

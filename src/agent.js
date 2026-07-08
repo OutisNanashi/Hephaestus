@@ -49,6 +49,7 @@ function ensureAgentRunDirectory(projectPath) {
     if (!fs.existsSync(directory)) fs.mkdirSync(directory);
     assertRealPathWithinRoot(projectPath, directory);
     if (!fs.statSync(directory).isDirectory()) fail("Agent run output path is not a directory.", "INVALID_AGENT_RUN_DIRECTORY");
+    if (process.platform !== "win32") fs.chmodSync(directory, 0o755);
   }
   return currentDirectory;
 }
@@ -64,6 +65,7 @@ export function deliverPrompt(projectPath, prompt) {
   const deliveredPromptPath = path.join(runDirectory, "prompt.md");
   if (fs.existsSync(deliveredPromptPath)) assertRealPathWithinRoot(projectPath, deliveredPromptPath);
   fs.writeFileSync(deliveredPromptPath, prompt, "utf8");
+  if (process.platform !== "win32") fs.chmodSync(deliveredPromptPath, 0o644);
   return deliveredPromptPath;
 }
 

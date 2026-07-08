@@ -5,6 +5,7 @@ import test from "node:test";
 import { run } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 import { checkSandboxHealth, runSandboxCommand, sandboxContainerExists } from "../src/sandbox.js";
+import { containerReadableTemporaryDirectory, makeTreeContainerReadable } from "./helpers/writable-temp.js";
 
 const validState = Object.freeze({
   currentPhase: "3",
@@ -23,7 +24,7 @@ const validState = Object.freeze({
 });
 
 function temporaryDirectory() {
-  return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-"));
+  return containerReadableTemporaryDirectory("hephaestus-sandbox-");
 }
 
 function writeJson(filePath, value) {
@@ -43,6 +44,7 @@ function makeContext() {
   const configPath = path.join(directory, "config.json");
   writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
   writeJson(path.join(directory, "projects.json"), { projects: [{ id: "demo-project", path: "demo-project" }] });
+  makeTreeContainerReadable(directory);
   return { directory, allowedRoot, projectPath, configPath };
 }
 
@@ -96,6 +98,7 @@ test("allowlisted npm test runs inside the mounted project and captures output",
   const context = makeContext();
   try {
     fs.writeFileSync(path.join(context.projectPath, "package.json"), JSON.stringify({ scripts: { test: "node -e \"console.log('sandbox-npm-ok')\"" } }));
+    makeTreeContainerReadable(context.projectPath);
     const report = runSandboxCommand({ allowedRoot: context.allowedRoot, projectPath: context.projectPath, commandId: "test-npm" });
     assert.equal(report.status, "passed");
     assert.match(report.stdout, /sandbox-npm-ok/u);

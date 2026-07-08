@@ -6,6 +6,7 @@ import { runAgentTask } from "../src/agent.js";
 import { run as runCli } from "../src/cli.js";
 import { HephaestusError } from "../src/errors.js";
 import { loadState, saveState, validateState } from "../src/state.js";
+import { containerReadableTemporaryDirectory, makeTreeContainerReadable } from "./helpers/writable-temp.js";
 
 const validState = Object.freeze({
   currentPhase: "6A",
@@ -23,7 +24,7 @@ const validState = Object.freeze({
   nextAction: "agent-run"
 });
 
-function temporaryDirectory() { return fs.mkdtempSync(path.join(path.resolve("test"), "tmp-")); }
+function temporaryDirectory() { return containerReadableTemporaryDirectory("hephaestus-6a-"); }
 function writeJson(filePath, value) { fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`); }
 function code(error, expected) { assert.ok(error instanceof HephaestusError); assert.equal(error.code, expected); return true; }
 
@@ -40,6 +41,7 @@ function makeContext(prompt = "# Delivered prompt\n\nDo the declared task.\n") {
   })) fs.writeFileSync(path.join(projectPath, name), content);
   writeJson(path.join(projectPath, "STATE.json"), validState);
   fs.writeFileSync(path.join(projectPath, "out", "prompts", "next-task.md"), prompt);
+  makeTreeContainerReadable(directory);
   return { directory, allowedRoot, projectPath, promptPath: "out/prompts/next-task.md" };
 }
 
@@ -157,6 +159,7 @@ test("CLI agent-run can deliver an allowed-root runtime prompt without printing 
   fs.writeFileSync(runtimePrompt, "# Runtime prompt\n\nDo not execute this text.\n");
   writeJson(configPath, { allowedRoot: "./projects", registryPath: "./projects.json", logDirectory: "./logs" });
   writeJson(registryPath, { projects: [{ id: "demo-project", path: "demo-project" }] });
+  makeTreeContainerReadable(context.directory);
   let stdout = "";
   const originalWrite = process.stdout.write;
   try {
