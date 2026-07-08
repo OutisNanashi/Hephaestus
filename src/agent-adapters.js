@@ -3,6 +3,7 @@ import { defineProviderCapabilities } from "./provider-adapter-contract.js";
 
 const REAL_AGENT_REASON = "Real coding agents do not run through the generic fixture sandbox path; Codex runs via the dedicated workspace exec module.";
 const FACTORY_DROID_PREFLIGHT_ONLY_REASON = "Factory Droid is registered in preflight-only mode; task execution is not enabled yet.";
+const CLAUDE_CODE_PREFLIGHT_ONLY_REASON = "Claude Code is registered in preflight-only mode; task execution is not enabled yet.";
 
 export const CODEX_PROVIDER_CAPABILITIES = defineProviderCapabilities({
   localProcess: true,
@@ -32,6 +33,23 @@ export const CODEX_PROVIDER_CAPABILITIES = defineProviderCapabilities({
 // only declares detection/capability intent; no execution, sandbox, or git capability
 // is claimed until a real execution path is implemented and gated on.
 export const FACTORY_DROID_PROVIDER_CAPABILITIES = defineProviderCapabilities({
+  localProcess: true,
+  headless: true,
+  nonInteractive: true,
+  longRunning: true,
+  stdoutCapture: true,
+  stderrCapture: true,
+  structuredReport: true,
+  conductorOwnsGit: true,
+  supportsPreflight: true
+});
+
+// Claude Code is prepared as a future headless lane. This step only declares
+// detection/capability intent; no execution, sandbox, or git capability is claimed
+// until a real gated adapter (with sandbox/parity tests) is implemented.
+// headless/nonInteractive reflect Claude Code's documented non-interactive print mode
+// (`claude -p/--print`, `--output-format json`); everything write/git-related stays off.
+export const CLAUDE_CODE_PROVIDER_CAPABILITIES = defineProviderCapabilities({
   localProcess: true,
   headless: true,
   nonInteractive: true,
@@ -83,7 +101,8 @@ const ADAPTERS = Object.freeze({
   "claude-code": Object.freeze({
     id: "claude-code", displayName: "Claude Code", kind: "real",
     executionAllowed: false, preflightSupported: true, defaultEnabled: false,
-    disabledReason: REAL_AGENT_REASON, expectedExecutable: "claude", fixtureCommandId: null
+    disabledReason: CLAUDE_CODE_PREFLIGHT_ONLY_REASON, expectedExecutable: "claude", fixtureCommandId: null,
+    capabilities: CLAUDE_CODE_PROVIDER_CAPABILITIES
   }),
   opencode: Object.freeze({
     id: "opencode", displayName: "OpenCode", kind: "real",

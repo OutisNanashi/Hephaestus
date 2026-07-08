@@ -78,8 +78,8 @@ test("registry exposes fixture, codex, claude-code, and opencode adapters with c
 });
 
 test("Codex provider adapter exposes capability metadata and remains the only live-executable provider", () => {
-  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex", "factory-droid"]);
-  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex", "factory-droid"]);
+  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex", "factory-droid", "claude-code"]);
+  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex", "factory-droid", "claude-code"]);
   const codex = getProviderAdapter("codex");
   assert.ok(codex);
   assert.equal(codex.displayName, "Codex");
@@ -97,7 +97,9 @@ test("Codex provider adapter exposes capability metadata and remains the only li
   // Codex is still the only provider that may be routed for real execution.
   assert.deepEqual(listLiveExecutableProviderIds(), ["codex"]);
   assert.equal(isProviderLiveExecutable("codex"), true);
-  assert.equal(getProviderAdapter("claude-code"), null);
+  // Claude Code is now a known provider, but still not live-executable.
+  assert.ok(getProviderAdapter("claude-code"));
+  assert.equal(getProviderAdapter("claude-code").liveExecutable, false);
 });
 
 test("Factory Droid appears as a known provider with detection-only capabilities and no execution", () => {
@@ -219,7 +221,7 @@ test("loadConfig validates the providers block and rejects unknown providers and
     assert.equal(isProviderLiveExecutable("factory-droid", config), false);
     assert.equal(isProviderLiveExecutable("codex", config), true);
 
-    writeJson(path.join(directory, "unknown.json"), { ...base, providers: { "claude-code": { enabled: true } } });
+    writeJson(path.join(directory, "unknown.json"), { ...base, providers: { devin: { enabled: true } } });
     assert.throws(() => loadConfig(path.join(directory, "unknown.json")), (error) => code(error, "INVALID_CONFIG"));
 
     writeJson(path.join(directory, "badkey.json"), { ...base, providers: { codex: { executionEnabled: true, bogus: 1 } } });

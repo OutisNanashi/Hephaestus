@@ -56,13 +56,16 @@ optional `provider` field in the project registry:
 - **Codex is currently the only executable provider.** `run-live` resolves the
   project's provider through the live-execution gate (`selectLiveProvider`)
   before any branch prep or task execution; only Codex passes today.
-- **Factory Droid (`factory-droid`) is preflight-only.** It is a *known*
-  provider — you can register it and run preflight/status inspection against the
-  `droid` CLI — but it is not live-executable. A project declaring
-  `factory-droid` is accepted by the registry yet fails fast with a clear
-  `PROVIDER_NOT_LIVE_EXECUTABLE` error before any task runs, until the real
-  Factory execution adapter is implemented. Enabling it in the `providers`
-  config block does not bypass this; the adapter capability gate still blocks it.
+- **Factory Droid (`factory-droid`) and Claude Code (`claude-code`) are
+  preflight-only lanes, not execution lanes yet.** They are *known* providers —
+  you can register them and run preflight/status inspection against the `droid`
+  and `claude` CLIs — but neither is live-executable. A project declaring one is
+  accepted by the registry yet fails fast with a clear
+  `PROVIDER_NOT_LIVE_EXECUTABLE` error before any task runs, and their adapters'
+  `runTask` refuse with `PROVIDER_NOT_ENABLED`. Enabling them in the `providers`
+  config block does not bypass this; the adapter capability gate still blocks
+  them. Their execution will require a later gated adapter with its own
+  sandbox/parity tests before it is turned on.
 - Unknown provider ids are rejected at registry load with `INVALID_REGISTRY`.
 - Live execution can be gated per provider in `hephaestus.config.json` via an
   optional `providers` block (`{ "<id>": { "enabled": bool, "executionEnabled": bool } }`);
