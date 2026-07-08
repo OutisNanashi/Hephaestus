@@ -13,6 +13,7 @@ export const CODEX_PROVIDER_ADAPTER = defineProviderAdapter({
   id: "codex",
   displayName: "Codex",
   kind: "local-process",
+  liveExecutable: true,
   capabilities: codexMetadata().capabilities,
   runTask(request) {
     return runCodexWorkspaceExec({ adapterId: "codex", ...request });

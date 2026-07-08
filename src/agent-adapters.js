@@ -2,6 +2,7 @@ import { fail } from "./errors.js";
 import { defineProviderCapabilities } from "./provider-adapter-contract.js";
 
 const REAL_AGENT_REASON = "Real coding agents do not run through the generic fixture sandbox path; Codex runs via the dedicated workspace exec module.";
+const FACTORY_DROID_PREFLIGHT_ONLY_REASON = "Factory Droid is registered in preflight-only mode; task execution is not enabled yet.";
 
 export const CODEX_PROVIDER_CAPABILITIES = defineProviderCapabilities({
   localProcess: true,
@@ -23,6 +24,21 @@ export const CODEX_PROVIDER_CAPABILITIES = defineProviderCapabilities({
   retryAfterDetectable: true,
   rateLimitIsProviderScoped: true,
   canEditWorktree: true,
+  conductorOwnsGit: true,
+  supportsPreflight: true
+});
+
+// Factory Droid is prepared as a future headless/artifact-producing lane. This step
+// only declares detection/capability intent; no execution, sandbox, or git capability
+// is claimed until a real execution path is implemented and gated on.
+export const FACTORY_DROID_PROVIDER_CAPABILITIES = defineProviderCapabilities({
+  localProcess: true,
+  headless: true,
+  nonInteractive: true,
+  longRunning: true,
+  stdoutCapture: true,
+  stderrCapture: true,
+  structuredReport: true,
   conductorOwnsGit: true,
   supportsPreflight: true
 });
@@ -73,6 +89,12 @@ const ADAPTERS = Object.freeze({
     id: "opencode", displayName: "OpenCode", kind: "real",
     executionAllowed: false, preflightSupported: true, defaultEnabled: false,
     disabledReason: REAL_AGENT_REASON, expectedExecutable: "opencode", fixtureCommandId: null
+  }),
+  "factory-droid": Object.freeze({
+    id: "factory-droid", displayName: "Factory Droid", kind: "real",
+    executionAllowed: false, preflightSupported: true, defaultEnabled: false,
+    disabledReason: FACTORY_DROID_PREFLIGHT_ONLY_REASON, expectedExecutable: "droid", fixtureCommandId: null,
+    capabilities: FACTORY_DROID_PROVIDER_CAPABILITIES
   })
 });
 

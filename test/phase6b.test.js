@@ -10,7 +10,10 @@ import { runAgentPreflight } from "../src/agent-preflight.js";
 import { run as runCli } from "../src/cli.js";
 import { loadConfig } from "../src/config.js";
 import { HephaestusError } from "../src/errors.js";
-import { getProviderAdapter, listProviderAdapters, PROVIDER_ADAPTER_IDS } from "../src/provider-adapters.js";
+import {
+  getProviderAdapter, isProviderLiveExecutable, listLiveExecutableProviderIds,
+  listProviderAdapters, PROVIDER_ADAPTER_IDS, runProviderTask
+} from "../src/provider-adapters.js";
 
 const validState = Object.freeze({
   currentPhase: "6B", currentTask: "real-adapter-boundary", currentBranch: "main", currentPr: null,
@@ -73,12 +76,13 @@ test("registry exposes fixture, codex, claude-code, and opencode adapters with c
   assert.throws(() => requireAdapter("unknown-agent"), (error) => code(error, "AGENT_ADAPTER_NOT_AVAILABLE"));
 });
 
-test("Codex provider adapter exposes capability metadata without enabling new providers", () => {
-  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex"]);
-  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex"]);
+test("Codex provider adapter exposes capability metadata and remains the only live-executable provider", () => {
+  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex", "factory-droid"]);
+  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex", "factory-droid"]);
   const codex = getProviderAdapter("codex");
   assert.ok(codex);
   assert.equal(codex.displayName, "Codex");
+  assert.equal(codex.liveExecutable, true);
   assert.equal(codex.capabilities.localProcess, true);
   assert.equal(codex.capabilities.headless, true);
   assert.equal(codex.capabilities.nonInteractive, true);
@@ -89,8 +93,68 @@ test("Codex provider adapter exposes capability metadata without enabling new pr
   assert.equal(codex.capabilities.usageLimitDetectable, true);
   assert.equal(codex.capabilities.conductorOwnsGit, true);
   assert.equal(codex.capabilities.canMergeAfterApproval, false);
+  // Codex is still the only provider that may be routed for real execution.
+  assert.deepEqual(listLiveExecutableProviderIds(), ["codex"]);
+  assert.equal(isProviderLiveExecutable("codex"), true);
   assert.equal(getProviderAdapter("claude-code"), null);
-  assert.equal(getProviderAdapter("factory-droid"), null);
+});
+
+test("Factory Droid appears as a known provider with detection-only capabilities and no execution", () => {
+  const factory = getProviderAdapter("factory-droid");
+  assert.ok(factory, "factory-droid should be a registered provider");
+  assert.equal(factory.displayName, "Factory Droid");
+  assert.equal(factory.capabilities.supportsPreflight, true);
+  assert.equal(factory.capabilities.headless, true);
+  assert.equal(factory.capabilities.nonInteractive, true);
+  assert.equal(factory.capabilities.longRunning, true);
+  assert.equal(factory.capabilities.structuredReport, true);
+  // No execution/sandbox/merge capability is claimed in preflight-only mode.
+  assert.equal(factory.capabilities.nativeSandbox, false);
+  assert.equal(factory.capabilities.supportsWorkspaceWrite, false);
+  assert.equal(factory.capabilities.canCommit, false);
+  assert.equal(factory.capabilities.canOpenPr, false);
+  assert.equal(factory.capabilities.canMergeAfterApproval, false);
+  // Known but not live-executable.
+  assert.equal(factory.liveExecutable, false);
+  assert.equal(isProviderLiveExecutable("factory-droid"), false);
+  assert.ok(!listLiveExecutableProviderIds().includes("factory-droid"));
+});
+
+test("Factory Droid preflight passes when a fake droid binary reports its version, without leaking secrets", () => {
+  const spawn = fakeSpawn(() => ({ status: 0, stdout: "droid 2.4.1\nAPI_KEY=sk-abcdefghijklmnop123456\n", stderr: "" }));
+  const report = getProviderAdapter("factory-droid").preflight({ env: { PATH: "/usr/bin" }, spawn });
+  assert.equal(report.adapterId, "factory-droid");
+  assert.equal(report.available, true);
+  assert.equal(report.reason, "version-detected");
+  assert.equal(report.preflightSupported, true);
+  assert.equal(report.mutatedProjectFiles, false);
+  assert.equal(report.promptSent, false);
+  assert.equal(fakeSpawn.lastCall.executable, "droid");
+  assert.deepEqual(fakeSpawn.lastCall.args, ["--version"]);
+  assert.equal(fakeSpawn.lastCall.shell, false);
+  // Secrets in probe output are redacted, never surfaced.
+  assert.equal(/sk-[A-Za-z0-9]/u.test(JSON.stringify(report)), false);
+});
+
+test("Factory Droid preflight returns a clean missing-cli result when droid is absent", () => {
+  const spawn = fakeSpawn(() => ({ status: null, stdout: "", stderr: "", error: Object.assign(new Error("droid not found"), { code: "ENOENT" }) }));
+  const report = getProviderAdapter("factory-droid").preflight({ env: { PATH: "/usr/bin" }, spawn });
+  assert.equal(report.adapterId, "factory-droid");
+  assert.equal(report.available, false);
+  assert.equal(report.reason, "executable-not-found");
+  assert.equal(report.version, null);
+  assert.match(report.detail, /not installed or not on PATH/u);
+});
+
+test("Factory Droid runTask refuses execution in preflight-only mode and never spawns", () => {
+  let spawned = false;
+  const result = runProviderTask("factory-droid", { spawn: () => { spawned = true; return {}; } });
+  assert.equal(spawned, false, "factory runTask must not spawn any process");
+  assert.equal(result.executed, false);
+  assert.equal(result.supported, false);
+  assert.equal(result.classification, "PROVIDER_NOT_ENABLED");
+  assert.equal(result.reason, "preflight-only");
+  assert.match(result.detail, /not enabled/u);
 });
 
 test("real adapters cannot execute tasks via runAgentTask and unknown adapters are rejected", () => {

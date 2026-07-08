@@ -44,6 +44,7 @@ const CAPABILITY_DEFAULTS = Object.freeze({
 
 export const PROVIDER_RESULT_CLASSIFICATIONS = Object.freeze({
   PASS: "PASS",
+  PROVIDER_NOT_ENABLED: "PROVIDER_NOT_ENABLED",
   ADAPTER_NOT_INSTALLED: "ADAPTER_NOT_INSTALLED",
   ADAPTER_NOT_AUTHENTICATED: "ADAPTER_NOT_AUTHENTICATED",
   USAGE_LIMIT: "USAGE_LIMIT",
@@ -98,6 +99,10 @@ export function defineProviderAdapter(adapter) {
     id: adapter.id,
     displayName: adapter.displayName,
     kind: adapter.kind ?? "local-process",
+    // Live-executable is opt-in: a provider is never routed for real task execution
+    // unless it explicitly declares liveExecutable: true. Defaults to false so newly
+    // registered providers are known/inspectable but cannot be run by accident.
+    liveExecutable: adapter.liveExecutable === true,
     capabilities: Object.freeze({ ...adapter.capabilities }),
     preflight: typeof adapter.preflight === "function" ? adapter.preflight : null,
     runTask: adapter.runTask,
