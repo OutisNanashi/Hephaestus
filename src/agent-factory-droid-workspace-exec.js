@@ -16,9 +16,21 @@ import { assertRealPathWithinRoot } from "./safe-path.js";
 // There is deliberately no default/real spawn in this file, so real `droid` can
 // never run from here, and it consumes no Factory credits.
 //
-// The planned command flags below are DESIGN PLACEHOLDERS. They have NOT been
-// verified against the real Factory Droid CLI and must be confirmed (and the
-// output contract pinned down) before any live execution adapter is built.
+// The command contract below is VERIFIED against the official Factory docs
+// (https://docs.factory.ai/cli/droid-exec/overview):
+//   - subcommand:      `droid exec` (headless, non-interactive)                [verified]
+//   - prompt by file:  `-f, --file <path>`                                     [verified]
+//   - output format:   `-o, --output-format json` -> {type, subtype, is_error,
+//                        duration_ms, num_turns, result, session_id}           [verified]
+//   - cwd scoping:     `--cwd <path>`                                          [verified]
+//   - autonomy:        `--auto low|medium|high`; `low` permits project-dir file
+//                        edits and blocks system mods / installs / git push;
+//                        commit is medium, push is high                        [verified]
+//   - dangerous flag:  `--skip-permissions-unsafe` (avoid; allows everything)  [verified]
+//   - exit codes:      0 success, non-zero failure                            [verified]
+// UNVERIFIED (docs do not specify): usage-limit / quota / auth failure message
+// text, and whether artifacts appear in structured output. Those remain
+// best-effort heuristics and are marked as such; do not treat them as final.
 // =============================================================================
 
 const PROVIDER_ID = "factory-droid";
@@ -27,27 +39,34 @@ const OUTPUT_SUMMARY_LIMIT = 240;
 
 const ALLOWED_REQUEST_KEYS = new Set([
   "adapterId", "allowedRoot", "projectPath", "projectId", "promptPath",
-  "artifactPath", "env", "spawn", "explicitFactoryExecutionPermit", "timeoutMs", "now"
+  "env", "spawn", "explicitFactoryExecutionPermit", "timeoutMs", "now"
 ]);
 
-// Planned, non-interactive, headless invocation. Prompt is delivered by file path
-// (never inline), and the expected mission artifact is written to a project-local path.
+// Verified safe invocation: headless JSON exec, prompt delivered by file, scoped to
+// the project cwd, at the lowest write-capable autonomy (project-dir edits only; no
+// git commit/push, no system changes). `--auto low` keeps the conductor owning git.
 export const FACTORY_DROID_EXEC_FLAGS = Object.freeze({
   subcommand: "exec",
-  headless: "--headless",
-  nonInteractive: "--non-interactive",
+  outputFormatFlag: "--output-format",
   outputFormat: "json",
+  autonomyFlag: "--auto",
+  autonomy: "low",
+  cwdFlag: "--cwd",
+  promptFileFlag: "-f",
   shell: false,
   mode: "mock-dry-run"
 });
 
-export const DEFAULT_ARTIFACT_PATH = "out/factory/mission.json";
+// Documented JSON output field names (droid exec --output-format json).
+export const FACTORY_DROID_JSON_FIELDS = Object.freeze([
+  "type", "subtype", "is_error", "duration_ms", "num_turns", "result", "session_id"
+]);
 
-// Flags that would let Factory act autonomously on git / bypass confinement. The
-// planned argv is asserted to contain none of these; they must never be introduced.
+// Autonomy levels that grant git/system power we must never request from automation:
+// `high` enables git push and deploys; `--skip-permissions-unsafe` allows everything.
+const FORBIDDEN_AUTONOMY = Object.freeze(["medium", "high"]);
 const FORBIDDEN_FACTORY_TOKENS = Object.freeze([
-  "--auto", "--auto-approve", "--yes", "-y", "--push", "--merge", "--commit",
-  "--force", "--allow-all", "--no-sandbox", "--sudo", "--dangerously-bypass-approvals"
+  "--skip-permissions-unsafe", "--dangerously-skip-permissions", "--yolo"
 ]);
 
 export const FACTORY_DROID_CLASSIFICATIONS = Object.freeze({
@@ -59,6 +78,7 @@ export const FACTORY_DROID_CLASSIFICATIONS = Object.freeze({
   MALFORMED_OUTPUT: "FACTORY_DROID_EXEC_MALFORMED_OUTPUT"
 });
 
+// UNVERIFIED heuristics: Factory does not document these message strings.
 const USAGE_LIMIT_PATTERNS = [
   /\busage\s+limit\b/iu,
   /purchase\s+more\s+credits/iu,
@@ -68,40 +88,36 @@ const USAGE_LIMIT_PATTERNS = [
   /\bquota\s+exceeded\b/iu,
   /\bconcurrency\s+limit\b/iu
 ];
-
+const AUTH_REQUIRED_PATTERNS = [
+  /\bFACTORY_API_KEY\b/u,
+  /not\s+authenticated/iu,
+  /authentication\s+required/iu,
+  /\bunauthorized\b/iu,
+  /\b401\b/u,
+  /invalid\s+api\s+key/iu
+];
 const BLOCKER_PATTERNS = [
   /(^|\n)\s*BLOCKED:/iu,
   /\bmission\s+blocked\b/iu,
   /\bwaiting\s+for\s+(?:approval|owner|input)\b/iu
 ];
-
-// A completed Factory mission is expected to emit structured output (a session/mission
-// id and/or an explicit completion status). Exit 0 without any such marker is treated
-// as malformed rather than silently accepted.
-const COMPLETION_PATTERNS = [
-  /"status"\s*:\s*"(?:completed|complete|success|succeeded)"/iu,
-  /\bmission\s+complete(?:d)?\b/iu,
-  /(?:session|mission)[_-]?id/iu
-];
-
 const RETRY_AFTER_PATTERN = /try\s+again\s+at\s+([^.\n]{1,80})/iu;
-const SESSION_ID_PATTERN = /(?:session|mission)[_-]?id["'\s:=]+([A-Za-z0-9._-]{3,})/iu;
-const ARTIFACT_PATTERN = /artifact(?:[_-]?path)?["'\s:=]+([^\s"',\]]+)/giu;
+// Factory API keys are documented as `fk-...`; redact them in addition to the shared patterns.
+const FACTORY_KEY_PATTERN = /\bfk-[A-Za-z0-9._-]{6,}/gu;
 
-export function buildFactoryDroidExecArgv({ promptFilePath, artifactPath }) {
+export function buildFactoryDroidExecArgv({ promptFilePath, projectPath }) {
   if (typeof promptFilePath !== "string" || promptFilePath.trim() === "") {
     fail("Factory exec requires a prompt file path.", "INVALID_FACTORY_EXEC_ARGV");
   }
-  if (typeof artifactPath !== "string" || artifactPath.trim() === "") {
-    fail("Factory exec requires an artifact output path.", "INVALID_FACTORY_EXEC_ARGV");
+  if (typeof projectPath !== "string" || projectPath.trim() === "") {
+    fail("Factory exec requires a project cwd path.", "INVALID_FACTORY_EXEC_ARGV");
   }
   return Object.freeze([
     FACTORY_DROID_EXEC_FLAGS.subcommand,
-    FACTORY_DROID_EXEC_FLAGS.headless,
-    FACTORY_DROID_EXEC_FLAGS.nonInteractive,
-    "--output-format", FACTORY_DROID_EXEC_FLAGS.outputFormat,
-    "--prompt-file", promptFilePath,
-    "--artifact-out", artifactPath
+    FACTORY_DROID_EXEC_FLAGS.outputFormatFlag, FACTORY_DROID_EXEC_FLAGS.outputFormat,
+    FACTORY_DROID_EXEC_FLAGS.autonomyFlag, FACTORY_DROID_EXEC_FLAGS.autonomy,
+    FACTORY_DROID_EXEC_FLAGS.cwdFlag, projectPath,
+    FACTORY_DROID_EXEC_FLAGS.promptFileFlag, promptFilePath
   ]);
 }
 
@@ -113,17 +129,28 @@ export function assertFactoryArgvSafety(argv) {
   for (const forbidden of FORBIDDEN_FACTORY_TOKENS) {
     if (flat.includes(forbidden)) fail(`Factory exec argv contains a forbidden token: ${forbidden}.`, "INVALID_FACTORY_EXEC_ARGV");
   }
+  // Autonomy, if present, must never escalate beyond the write-confined `low` tier.
+  const autoIndex = flat.indexOf(FACTORY_DROID_EXEC_FLAGS.autonomyFlag);
+  if (autoIndex !== -1 && FORBIDDEN_AUTONOMY.includes(flat[autoIndex + 1])) {
+    fail(`Factory exec argv requests an unsafe autonomy level: ${flat[autoIndex + 1]}.`, "INVALID_FACTORY_EXEC_ARGV");
+  }
   return argv;
 }
 
-// Only login/discovery variables are forwarded; no API keys or tokens ever reach the
-// (mock) process, mirroring the Codex safe-environment policy.
+// Real Factory auth uses the FACTORY_API_KEY env var (format `fk-...`). It is a secret,
+// so — like Codex withholding OPENAI_API_KEY — the mock boundary never forwards it. When
+// a real execution path is built, forwarding it will be a deliberate, documented choice.
 function safeEnvironment(env) {
   const safe = { LANG: "C.UTF-8", PATH: env.PATH ?? env.Path ?? env.path ?? "" };
-  for (const key of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "FACTORY_HOME", "DROID_HOME"]) {
+  for (const key of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"]) {
     if (typeof env[key] === "string" && env[key] !== "") safe[key] = env[key];
   }
   return safe;
+}
+
+// Shared redaction plus Factory's documented `fk-` API key format.
+function redactFactory(text) {
+  return redactPreflightText(text).replace(FACTORY_KEY_PATTERN, "[REDACTED]");
 }
 
 function summarize(text) {
@@ -139,26 +166,28 @@ function extractRetryAfter(text) {
   return trimmed.length === 0 || trimmed.length > 80 ? null : trimmed;
 }
 
-function extractSessionId(text) {
-  const match = SESSION_ID_PATTERN.exec(text);
-  return match === null ? null : match[1];
+// Parse the documented JSON result object from stdout. Returns null when stdout is not a
+// single JSON object with the expected shape (used to detect malformed output).
+function parseExecJson(stdout) {
+  const trimmed = stdout.trim();
+  if (trimmed === "" || trimmed[0] !== "{") return null;
+  let parsed;
+  try { parsed = JSON.parse(trimmed); } catch { return null; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (typeof parsed.session_id !== "string" || typeof parsed.is_error !== "boolean") return null;
+  return parsed;
 }
 
-function extractArtifacts(text) {
-  const found = new Set();
-  let match;
-  ARTIFACT_PATTERN.lastIndex = 0;
-  while ((match = ARTIFACT_PATTERN.exec(text)) !== null) found.add(match[1]);
-  return Object.freeze([...found]);
-}
-
-function classify({ spawnError, errorCode, timedOut, exitCode, combined }) {
+function classify({ spawnError, errorCode, timedOut, exitCode, combined, parsed }) {
   if (spawnError !== null || errorCode === "ENOENT" || errorCode === "EACCES") return FACTORY_DROID_CLASSIFICATIONS.FAILED;
   if (timedOut) return FACTORY_DROID_CLASSIFICATIONS.FAILED;
   if (USAGE_LIMIT_PATTERNS.some((rx) => rx.test(combined))) return FACTORY_DROID_CLASSIFICATIONS.USAGE_LIMIT;
+  if (AUTH_REQUIRED_PATTERNS.some((rx) => rx.test(combined))) return FACTORY_DROID_CLASSIFICATIONS.FAILED;
   if (BLOCKER_PATTERNS.some((rx) => rx.test(combined))) return FACTORY_DROID_CLASSIFICATIONS.BLOCKED;
   if (typeof exitCode !== "number" || exitCode !== 0) return FACTORY_DROID_CLASSIFICATIONS.FAILED;
-  if (combined.trim() === "" || !COMPLETION_PATTERNS.some((rx) => rx.test(combined))) return FACTORY_DROID_CLASSIFICATIONS.MALFORMED_OUTPUT;
+  // Exit 0: require the documented JSON result object. is_error true is still a failure.
+  if (parsed === null) return FACTORY_DROID_CLASSIFICATIONS.MALFORMED_OUTPUT;
+  if (parsed.is_error === true) return FACTORY_DROID_CLASSIFICATIONS.FAILED;
   return FACTORY_DROID_CLASSIFICATIONS.COMPLETED;
 }
 
@@ -187,7 +216,7 @@ function notEnabledResult({ reason, detail, plannedArgv = null }) {
 
 /**
  * Dry-run/mock Factory Droid execution boundary. Validates the request, enforces the
- * safety invariants, constructs the planned safe command, and — only when an explicit
+ * safety invariants, constructs the VERIFIED safe command, and — only when an explicit
  * permit AND an injected spawn are supplied — runs that injected (fake) spawn and maps
  * its output to a Factory classification. It writes no state and delivers no prompt file;
  * it is a pure, side-effect-free scaffold for testing the boundary before real execution.
@@ -223,12 +252,7 @@ export function runFactoryDroidWorkspaceExec(request) {
   const prompt = readPrompt(sourcePromptPath);
   if (typeof prompt !== "string" || prompt.trim() === "") fail("Factory exec prompt must be non-empty.", "INVALID_FACTORY_EXEC_PROMPT");
 
-  const artifactPath = request.artifactPath ?? DEFAULT_ARTIFACT_PATH;
-  if (typeof artifactPath !== "string" || artifactPath.length === 0 || path.isAbsolute(artifactPath) || artifactPath.split(/[\\/]+/u).includes("..")) {
-    fail("Factory exec artifactPath must be a relative project path without traversal.", "INVALID_FACTORY_EXEC_ARTIFACT_PATH");
-  }
-
-  const plannedArgv = assertFactoryArgvSafety(buildFactoryDroidExecArgv({ promptFilePath: sourcePromptPath, artifactPath }));
+  const plannedArgv = assertFactoryArgvSafety(buildFactoryDroidExecArgv({ promptFilePath: sourcePromptPath, projectPath }));
 
   // Execution gate: never run anything unless the caller explicitly permits the mock run
   // AND supplies the injected spawn. There is no real-binary fallback, so real `droid`
@@ -272,14 +296,15 @@ export function runFactoryDroidWorkspaceExec(request) {
   }
   const finishedAt = now();
 
-  const stdout = redactPreflightText(result?.stdout ?? "");
-  const stderr = redactPreflightText(result?.stderr ?? "");
+  const stdout = redactFactory(result?.stdout ?? "");
+  const stderr = redactFactory(result?.stderr ?? "");
   const combined = `${stdout}${stderr}`;
   const errorCode = spawnError?.code ?? result?.error?.code ?? null;
   const timedOut = result?.error?.code === "ETIMEDOUT" || result?.signal === "SIGTERM" || result?.signal === "SIGKILL";
   const exitCode = typeof result?.status === "number" ? result.status : null;
+  const parsed = parseExecJson(stdout);
 
-  const classification = classify({ spawnError, errorCode, timedOut, exitCode, combined });
+  const classification = classify({ spawnError, errorCode, timedOut, exitCode, combined, parsed });
   const outcome = CLASSIFICATION_OUTCOMES[classification];
   const usageLimitDetected = classification === FACTORY_DROID_CLASSIFICATIONS.USAGE_LIMIT;
   const blockerDetected = outcome.status === "blocked";
@@ -300,15 +325,17 @@ export function runFactoryDroidWorkspaceExec(request) {
       shell: false,
       headless: true,
       nonInteractive: true,
+      outputFormat: FACTORY_DROID_EXEC_FLAGS.outputFormat,
+      autonomy: FACTORY_DROID_EXEC_FLAGS.autonomy,
+      promptDelivery: "file (-f/--file)",
+      gitAutonomy: "project-dir edits only (--auto low; no commit/push/merge)",
       dangerousBypass: false,
-      autoGit: false,
       stdinPolicy: "closed-empty",
-      envPolicy: "sandbox-safe (LANG, PATH, home locations; no API keys)",
+      envPolicy: "sandbox-safe (LANG, PATH, home locations; no FACTORY_API_KEY)",
       cwd: projectPath,
       timeoutMs
     }),
     promptPath: sourcePromptPath,
-    artifactPath,
     startedAt,
     finishedAt,
     exitCode,
@@ -317,8 +344,9 @@ export function runFactoryDroidWorkspaceExec(request) {
     stdout,
     stderr,
     summary: summarize(combined),
-    sessionId: extractSessionId(combined),
-    artifacts: extractArtifacts(combined),
+    sessionId: parsed?.session_id ?? null,
+    result: typeof parsed?.result === "string" ? parsed.result : null,
+    isError: parsed?.is_error ?? null,
     usageLimitDetected,
     blockerDetected,
     retryAfter: usageLimitDetected ? extractRetryAfter(combined) : null,

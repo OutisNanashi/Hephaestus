@@ -1,0 +1,9 @@
+{
+  "type": "result",
+  "subtype": "error",
+  "is_error": true,
+  "duration_ms": 4210,
+  "num_turns": 2,
+  "result": "Could not complete the objective: a required tool call was denied by the current autonomy level.",
+  "session_id": "01JQ9G7A1B2C3D4E5F6G7H8J9K"
+}
