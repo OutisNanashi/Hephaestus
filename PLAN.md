@@ -142,22 +142,26 @@ The conductor is the automated messenger and state machine.
 C. Coding agents
 Coding agents are the workers.
 Each coding agent should work on one project or one isolated task at a time.
-Examples.
+The intended initial Hephaestus builder-agent stack is.
 ```text
 Claude Code
-Codex
-OpenCode
+OpenAI Codex
+Cursor Agent
+OpenCode + GLM-5.2
+Devin
+Factory Droid
+```
+Other coding agents may be useful later, but they are examples only and are not part of the intended initial stack unless explicitly promoted.
+Examples outside the initial stack.
+```text
 Cline
 Aider
-Cursor
-Devin
 Jules
-Amp
+Sourcegraph Amp
 v0
 Bolt
 Replit Agent
 GitHub Copilot coding agent
-Factory Droids
 Kiro
 JetBrains Junie
 ```
@@ -452,13 +456,19 @@ Hermes
 uses Claude Code
 
 Kioku
-uses Codex
+uses OpenAI Codex
 
 Alfred
-uses OpenCode
+uses Cursor Agent
 
-New prototype
-uses v0 or Replit Agent
+Mimir
+uses OpenCode + GLM-5.2
+
+Long migration
+uses Devin
+
+Factory lane
+uses Factory Droid
 ```
 All projects can run at the same time.
 Each project must have.
@@ -478,13 +488,19 @@ Hermes loop
 GPT brain + Claude Code
 
 Kioku loop
-GPT brain + Codex
+GPT brain + OpenAI Codex
 
 Alfred loop
-GPT brain + OpenCode
+GPT brain + Cursor Agent
 
-Prototype loop
-GPT brain + v0 or Replit
+Mimir loop
+GPT brain + OpenCode + GLM-5.2
+
+Long migration loop
+GPT brain + Devin
+
+Factory lane loop
+GPT brain + Factory Droid
 ```
 Each loop is independent.
 No coding agent should work on the same branch as another coding agent unless GPT explicitly plans that coordination.
@@ -659,10 +675,19 @@ Claude near usage limit
 Pause Claude projects
 
 Codex still available
-Continue Codex projects
+Continue OpenAI Codex projects
 
 OpenCode still available
-Continue OpenCode projects
+Continue OpenCode + GLM-5.2 projects
+
+Cursor Agent still available
+Continue Cursor Agent projects
+
+Devin still available
+Continue Devin projects
+
+Factory Droid still available
+Continue Factory Droid projects
 
 All builder agents limited
 Only summarize logs and prepare next prompts
@@ -673,7 +698,7 @@ The conductor should detect usage-limit messages dynamically where possible.
 The conductor should avoid starting new tasks on an agent close to its limit.
 The conductor should continue other projects with other agents when available.
 19. Agent assignment strategy
-Use different agents for different project types.
+Use the six intended builder lanes for different project types.
 Claude Code
 Use for.
 ```text
@@ -684,7 +709,7 @@ Backend logic
 Hard repo reasoning
 Sensitive repo-wide changes
 ```
-Codex
+OpenAI Codex
 Use for.
 ```text
 Parallel coding tasks
@@ -695,25 +720,27 @@ Test repair
 Cloud tasks
 Isolated feature branches
 ```
-OpenCode or Cline
-Use for.
-```text
-Extra local workers
-Small features
-Simple implementation tasks
-Config work
-Tooling
-Repo chores
-```
-Cursor
+Cursor Agent
 Use for.
 ```text
 Hands-on IDE work
 Fast UI iteration
 Manual supervised edits
 Autocomplete-heavy development
+Editor-native refactors
 ```
-Devin or Factory
+OpenCode + GLM-5.2
+Use for.
+```text
+Extra local or container workers
+Small features
+Simple implementation tasks
+Config work
+Tooling
+Repo chores
+Cost-sensitive coding tasks
+```
+Devin
 Use for.
 ```text
 Larger independent engineering tasks
@@ -722,17 +749,20 @@ Migrations
 Autonomous project execution
 Longer-running build work
 ```
-Jules, Amp, Kiro, Junie
+Factory Droid
 Use for.
 ```text
 Additional parallel agent lanes
-GitHub-connected tasks
-Large codebase understanding
-IDE-specific workflows
-Spec-driven builds
+Headless or CI-friendly automation
+Structured artifact-producing tasks
+Factory Missions
+Agent-readiness and review workflows
+Policy-controlled execution
 ```
-v0 or Bolt
-Use for.
+Other agents such as Sourcegraph Amp, GitHub Copilot coding agent, Jules, Kiro, Junie, v0, Bolt, Replit Agent, Cline, and Aider are examples only.
+They are not part of the intended initial Hephaestus builder-agent stack.
+Use them later only if GPT explicitly promotes an additional lane.
+Example later-only uses.
 ```text
 UI prototypes
 Dashboards
@@ -740,10 +770,6 @@ Landing pages
 React components
 Design exploration
 Fast frontend drafts
-```
-Replit Agent
-Use for.
-```text
 Small MVPs
 Quick web apps
 Standalone prototypes
@@ -836,15 +862,20 @@ Running
 Fixing tests
 
 Kioku
-Codex
+OpenAI Codex
 Phase 2
 Merged
 Starting Phase 3
 
 Alfred
-OpenCode
+Cursor Agent
 Blocked
 Needs VPS manual action
+
+Mimir
+OpenCode + GLM-5.2
+Running
+Fixing tests
 ```
 The dashboard should not be required for the first working version.
 It should only make supervision easier later.
