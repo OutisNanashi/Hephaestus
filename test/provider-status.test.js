@@ -161,3 +161,70 @@ test("--providers and --preflight flags are scoped to status", () => {
   assert.throws(() => run(["run-live", "--providers", "--project", "x"]), (error) => code(error, "INVALID_ARGUMENT"));
   assert.throws(() => run(["status", "--preflight"]), (error) => code(error, "INVALID_ARGUMENT"));
 });
+
+// A fake --version probe that records every call so tests can prove the real binaries
+// were never invoked. It answers codex/droid and injects a secret to check redaction.
+function recordingSpawn() {
+  const calls = [];
+  const spawn = (executable, args, options) => {
+    calls.push({ executable, args: [...args], shell: options?.shell });
+    if (args.includes("--version") && (executable === "droid" || executable === "codex")) {
+      return { status: 0, stdout: `${executable} 9.9.9\nTOKEN=sk-abcdefghijklmnop123456\n`, stderr: "" };
+    }
+    return { status: 127, stdout: "", stderr: "unexpected probe" };
+  };
+  spawn.calls = calls;
+  return spawn;
+}
+
+test("CLI status --providers --preflight reaches the preflight path via an injected spawn (no real binaries, secrets redacted)", () => {
+  const c = context();
+  const spawn = recordingSpawn();
+  let fetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => { fetchCalled = true; throw new Error("status must not contact external services"); };
+  try {
+    const before = fs.readdirSync(c.root, { recursive: true }).sort();
+    const output = capture(() => assert.equal(run(["status", "--providers", "--preflight", "--config", c.config], { providerPreflightSpawn: spawn }), 0));
+    const result = JSON.parse(output);
+    assert.equal(result.mode, "read-only-providers-preflight");
+
+    // (1) reached the preflight path: every provider row carries a preflight report.
+    assert.ok(result.providers.every((row) => row.preflight !== undefined));
+    // (2) the injected fake spawn was used, only for safe --version probes.
+    assert.ok(spawn.calls.length >= 1, "the injected spawn must be used");
+    assert.ok(spawn.calls.every((call) => call.args.includes("--version")), "only --version probes are allowed");
+    assert.ok(spawn.calls.every((call) => call.shell === false), "probes never use a shell");
+    assert.deepEqual([...new Set(spawn.calls.map((call) => call.executable))].sort(), ["codex", "droid"]);
+
+    // (3) Factory Droid preflight is reported cleanly as available.
+    const factory = result.providers.find((row) => row.provider === "factory-droid");
+    assert.equal(factory.known, true);
+    assert.equal(factory.liveExecutable, false, "preflight availability must not make Factory live-executable");
+    assert.equal(factory.preflight.available, true);
+    assert.equal(factory.preflight.reason, "version-detected");
+    assert.equal(factory.preflight.promptSent, false);
+
+    // (4) secret-like output is redacted from the entire CLI output.
+    assert.equal(/sk-[A-Za-z0-9]/u.test(output), false);
+    // (5) no project files were modified and no network was contacted.
+    assert.deepEqual(fs.readdirSync(c.root, { recursive: true }).sort(), before);
+    assert.equal(fetchCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(c.directory, { recursive: true, force: true });
+  }
+});
+
+test("CLI status --providers without --preflight never invokes the injected spawn", () => {
+  const c = context();
+  let spawnCalled = false;
+  const spawn = () => { spawnCalled = true; return { status: 0, stdout: "", stderr: "" }; };
+  try {
+    const output = capture(() => assert.equal(run(["status", "--providers", "--config", c.config], { providerPreflightSpawn: spawn }), 0));
+    const result = JSON.parse(output);
+    assert.equal(result.mode, "read-only-providers");
+    assert.equal(spawnCalled, false, "no probe runs without --preflight");
+    assert.ok(result.providers.every((row) => row.preflight === undefined));
+  } finally { fs.rmSync(c.directory, { recursive: true, force: true }); }
+});

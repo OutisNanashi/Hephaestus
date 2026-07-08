@@ -215,7 +215,13 @@ function runInternal(argv, handlers = {}) {
     if (providersFlag) {
       // Read-only provider readiness. Preflight (safe --version probe only) runs solely
       // when --preflight is requested; plain status --providers spawns nothing.
-      const providersStatus = projectProviderStatuses(projects, { config, preflight: preflightFlag });
+      // handlers.providerPreflightSpawn is a narrow test seam: when absent (production)
+      // the preflight uses the real hardcoded --version probe.
+      const providersStatus = projectProviderStatuses(projects, {
+        config,
+        preflight: preflightFlag,
+        ...(typeof handlers.providerPreflightSpawn === "function" ? { spawn: handlers.providerPreflightSpawn } : {})
+      });
       process.stdout.write(`${JSON.stringify({ mode: preflightFlag ? "read-only-providers-preflight" : "read-only-providers", providers: providersStatus }, null, 2)}\n`);
       return 0;
     }
@@ -584,8 +590,11 @@ function runInternal(argv, handlers = {}) {
   return 0;
 }
 
-export function run(argv) {
-  return runInternal(argv);
+// `options` is a minimal seam for tests: it is forwarded as the runInternal handlers
+// object (e.g. { providerPreflightSpawn }) so provider preflight can use a fake spawn
+// instead of invoking real binaries. Production callers pass no options.
+export function run(argv, options = {}) {
+  return runInternal(argv, options);
 }
 
 export async function runAsync(argv) {
