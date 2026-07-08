@@ -78,8 +78,8 @@ test("registry exposes fixture, codex, claude-code, and opencode adapters with c
 });
 
 test("Codex provider adapter exposes capability metadata and remains the only live-executable provider", () => {
-  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex", "factory-droid", "claude-code"]);
-  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex", "factory-droid", "claude-code"]);
+  assert.deepEqual(PROVIDER_ADAPTER_IDS, ["codex", "factory-droid", "claude-code", "cursor-agent"]);
+  assert.deepEqual(listProviderAdapters().map((adapter) => adapter.id), ["codex", "factory-droid", "claude-code", "cursor-agent"]);
   const codex = getProviderAdapter("codex");
   assert.ok(codex);
   assert.equal(codex.displayName, "Codex");

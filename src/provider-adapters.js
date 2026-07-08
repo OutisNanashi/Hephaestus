@@ -1,12 +1,14 @@
 import { fail } from "./errors.js";
 import { CLAUDE_CODE_PROVIDER_ADAPTER } from "./claude-code-provider-adapter.js";
 import { CODEX_PROVIDER_ADAPTER } from "./codex-provider-adapter.js";
+import { CURSOR_AGENT_PROVIDER_ADAPTER } from "./cursor-agent-provider-adapter.js";
 import { FACTORY_DROID_PROVIDER_ADAPTER } from "./factory-droid-provider-adapter.js";
 
 const PROVIDER_ADAPTERS = Object.freeze({
   codex: CODEX_PROVIDER_ADAPTER,
   "factory-droid": FACTORY_DROID_PROVIDER_ADAPTER,
-  "claude-code": CLAUDE_CODE_PROVIDER_ADAPTER
+  "claude-code": CLAUDE_CODE_PROVIDER_ADAPTER,
+  "cursor-agent": CURSOR_AGENT_PROVIDER_ADAPTER
 });
 
 export const PROVIDER_ADAPTER_IDS = Object.freeze(Object.keys(PROVIDER_ADAPTERS));

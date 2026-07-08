@@ -103,6 +103,10 @@ export function defineProviderAdapter(adapter) {
     // unless it explicitly declares liveExecutable: true. Defaults to false so newly
     // registered providers are known/inspectable but cannot be run by accident.
     liveExecutable: adapter.liveExecutable === true,
+    // Documented intended model for this provider (e.g. "grok-4.5" for Cursor Agent). This is
+    // metadata only: it records intent for status/inspection and never selects a model or
+    // enables execution. Defaults to null when a provider has no single intended model.
+    intendedModel: typeof adapter.intendedModel === "string" && adapter.intendedModel.trim() !== "" ? adapter.intendedModel.trim() : null,
     capabilities: Object.freeze({ ...adapter.capabilities }),
     preflight: typeof adapter.preflight === "function" ? adapter.preflight : null,
     runTask: adapter.runTask,

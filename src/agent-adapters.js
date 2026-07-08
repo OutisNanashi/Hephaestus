@@ -4,6 +4,7 @@ import { defineProviderCapabilities } from "./provider-adapter-contract.js";
 const REAL_AGENT_REASON = "Real coding agents do not run through the generic fixture sandbox path; Codex runs via the dedicated workspace exec module.";
 const FACTORY_DROID_PREFLIGHT_ONLY_REASON = "Factory Droid is registered in preflight-only mode; task execution is not enabled yet.";
 const CLAUDE_CODE_PREFLIGHT_ONLY_REASON = "Claude Code is registered in preflight-only mode; task execution is not enabled yet.";
+const CURSOR_AGENT_PREFLIGHT_ONLY_REASON = "Cursor Agent is registered in preflight-only mode; task execution is not enabled yet.";
 
 export const CODEX_PROVIDER_CAPABILITIES = defineProviderCapabilities({
   localProcess: true,
@@ -50,6 +51,25 @@ export const FACTORY_DROID_PROVIDER_CAPABILITIES = defineProviderCapabilities({
 // headless/nonInteractive reflect Claude Code's documented non-interactive print mode
 // (`claude -p/--print`, `--output-format json`); everything write/git-related stays off.
 export const CLAUDE_CODE_PROVIDER_CAPABILITIES = defineProviderCapabilities({
+  localProcess: true,
+  headless: true,
+  nonInteractive: true,
+  longRunning: true,
+  stdoutCapture: true,
+  stderrCapture: true,
+  structuredReport: true,
+  conductorOwnsGit: true,
+  supportsPreflight: true
+});
+
+// Cursor Agent (the `cursor-agent` CLI) is prepared as a future headless lane whose
+// intended model is Grok 4.5. This step only declares detection/capability intent; no
+// execution, sandbox, or git capability is claimed until a real gated adapter (with its
+// own sandbox/parity tests and a verified `--model` contract) is implemented.
+// headless/nonInteractive reflect the documented non-interactive print mode
+// (`cursor-agent -p/--print`, `--output-format text|json|stream-json`); everything
+// write/git-related stays off.
+export const CURSOR_AGENT_PROVIDER_CAPABILITIES = defineProviderCapabilities({
   localProcess: true,
   headless: true,
   nonInteractive: true,
@@ -114,6 +134,15 @@ const ADAPTERS = Object.freeze({
     executionAllowed: false, preflightSupported: true, defaultEnabled: false,
     disabledReason: FACTORY_DROID_PREFLIGHT_ONLY_REASON, expectedExecutable: "droid", fixtureCommandId: null,
     capabilities: FACTORY_DROID_PROVIDER_CAPABILITIES
+  }),
+  "cursor-agent": Object.freeze({
+    id: "cursor-agent", displayName: "Cursor Agent + Grok 4.5", kind: "real",
+    executionAllowed: false, preflightSupported: true, defaultEnabled: false,
+    disabledReason: CURSOR_AGENT_PREFLIGHT_ONLY_REASON, expectedExecutable: "cursor-agent", fixtureCommandId: null,
+    // intendedModel records the *documented intent* (Grok 4.5). It does not select a model
+    // or enable execution; the exact `--model` string is verified when a gated adapter ships.
+    intendedModel: "grok-4.5",
+    capabilities: CURSOR_AGENT_PROVIDER_CAPABILITIES
   })
 });
 

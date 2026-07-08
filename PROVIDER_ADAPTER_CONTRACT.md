@@ -290,9 +290,15 @@ status: synchronous process result unless CLI exposes session polling
 lane. It likely needs `requiresContainer=true`, explicit model/backend config,
 strict env allowlists, and conductor-owned git/merge behavior.
 
-`Cursor Agent` should stay in registry/preflight-only mode until exact local
-headless CLI flags are verified. Treat it as `ideSession` or `local-process`
-only after confirming non-interactive prompt delivery and output capture.
+`Cursor Agent` is now registered as a `local-process`, preflight-only known
+provider (`cursor-agent`) with intended model Grok 4.5 (`intendedModel:
+"grok-4.5"`). Its `headless`/`nonInteractive` capabilities reflect the
+documented non-interactive print mode (`cursor-agent -p/--print`,
+`--output-format text|json|stream-json`) and model selection is documented as
+`-m/--model` (`--list-models` to enumerate). It stays execution-disabled: the
+exact `--model` value for Grok 4.5, non-interactive prompt delivery, and output
+capture remain unverified locally (the CLI is not installed), so real execution
+waits on a gated adapter that confirms those against an installed binary.
 
 `Devin` should be modeled as `cloudSession`, not a normal local process. Its
 adapter should start or update an external supervised session, poll status,

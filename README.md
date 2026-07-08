@@ -56,16 +56,20 @@ optional `provider` field in the project registry:
 - **Codex is currently the only executable provider.** `run-live` resolves the
   project's provider through the live-execution gate (`selectLiveProvider`)
   before any branch prep or task execution; only Codex passes today.
-- **Factory Droid (`factory-droid`) and Claude Code (`claude-code`) are
-  preflight-only lanes, not execution lanes yet.** They are *known* providers —
-  you can register them and run preflight/status inspection against the `droid`
-  and `claude` CLIs — but neither is live-executable. A project declaring one is
-  accepted by the registry yet fails fast with a clear
-  `PROVIDER_NOT_LIVE_EXECUTABLE` error before any task runs, and their adapters'
-  `runTask` refuse with `PROVIDER_NOT_ENABLED`. Enabling them in the `providers`
-  config block does not bypass this; the adapter capability gate still blocks
-  them. Their execution will require a later gated adapter with its own
-  sandbox/parity tests before it is turned on.
+- **Factory Droid (`factory-droid`), Claude Code (`claude-code`), and Cursor
+  Agent + Grok 4.5 (`cursor-agent`) are preflight-only lanes, not execution
+  lanes yet.** They are *known* providers — you can register them and run
+  preflight/status inspection against the `droid`, `claude`, and `cursor-agent`
+  CLIs — but none is live-executable. A project declaring one is accepted by the
+  registry yet fails fast with a clear `PROVIDER_NOT_LIVE_EXECUTABLE` error
+  before any task runs, and their adapters' `runTask` refuse with
+  `PROVIDER_NOT_ENABLED`. Enabling them in the `providers` config block does not
+  bypass this; the adapter capability gate still blocks them. Their execution
+  will require a later gated adapter with its own sandbox/parity tests before it
+  is turned on. The Cursor Agent lane records Grok 4.5 as its *intended* model
+  (adapter `intendedModel: "grok-4.5"`), but selecting Grok 4.5 through the
+  `cursor-agent --model` flag stays unverified and unwired until that gated
+  adapter ships — no Cursor/Grok credits are consumed by the preflight lane.
 - Unknown provider ids are rejected at registry load with `INVALID_REGISTRY`.
 - Live execution can be gated per provider in `hephaestus.config.json` via an
   optional `providers` block (`{ "<id>": { "enabled": bool, "executionEnabled": bool } }`);
@@ -94,10 +98,11 @@ Each row distinguishes four separate concepts:
   is true may `run-live` execute the provider. When false, a `reason` is given
   (`unknown-provider`, `not-live-executable-capability`, or `disabled-by-config`).
 
-Today this means Codex reports `liveExecutable: true`, while **Factory Droid
-reports `known: true`, `preflightSupported: true`, `liveExecutable: false`
-(`not-live-executable-capability`)** — it stays preflight-only until the real
-Factory execution adapter is implemented. Any preflight output is redacted of
+Today this means Codex reports `liveExecutable: true`, while **Factory Droid,
+Claude Code, and Cursor Agent + Grok 4.5 each report `known: true`,
+`preflightSupported: true`, `liveExecutable: false`
+(`not-live-executable-capability`)** — they stay preflight-only until their real
+execution adapters are implemented. Any preflight output is redacted of
 secret-like text before it is printed.
 
 ## Safety model
